@@ -1,0 +1,179 @@
+{
+  "type": "object",
+  "properties": {
+    "summary": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "needs_more_work",
+        "task_completed",
+        "goal_completed",
+        "blocked",
+        "paused_for_human"
+      ]
+    },
+    "current_task_completed": {
+      "type": "boolean"
+    },
+    "made_progress": {
+      "type": "boolean"
+    },
+    "stayed_on_mission": {
+      "type": "boolean"
+    },
+    "risk_level": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    "requires_human": {
+      "type": "boolean"
+    },
+    "human_reason": {
+      "type": "string"
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "files_touched": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "bugs_found": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "signature": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ]
+          }
+        },
+        "required": [
+          "signature",
+          "description",
+          "severity"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "tasks_completed": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "tasks_to_add": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "rationale": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ]
+          }
+        },
+        "required": [
+          "title",
+          "rationale",
+          "priority"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "next_focus_task": {
+      "type": "string"
+    },
+    "definition_of_done": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "criterion": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "met",
+              "not_met",
+              "blocked",
+              "unknown"
+            ]
+          },
+          "evidence": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "criterion",
+          "status",
+          "evidence"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "proposed_goal_changes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "blockers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "summary",
+    "status",
+    "current_task_completed",
+    "made_progress",
+    "stayed_on_mission",
+    "risk_level",
+    "requires_human",
+    "human_reason",
+    "evidence",
+    "files_touched",
+    "bugs_found",
+    "tasks_completed",
+    "tasks_to_add",
+    "next_focus_task",
+    "definition_of_done",
+    "proposed_goal_changes",
+    "blockers"
+  ],
+  "additionalProperties": false
+}

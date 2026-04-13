@@ -1,0 +1,4 @@
+.longrun/
+.long-run/
+node_modules/
+.omx/
