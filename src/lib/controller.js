@@ -575,6 +575,21 @@ export class LongRunController {
     state.controller.managerClarifiedAt = agentSession.lastRunAt;
     assertManagerClarificationBudget(runtimeResult.result.questions);
 
+    if (runtimeResult.result.status !== "completed") {
+      runBundle.run.status = "paused";
+      runBundle.run.pendingApproval = {
+        required: true,
+        reason: `Manager bootstrap ${runtimeResult.result.status}: ${runtimeResult.result.summary}`,
+        requestedAt: isoNow(),
+        approvedAt: null,
+        note: "",
+      };
+      state.controller.currentPhase = "understanding";
+      await saveRun(runBundle.paths, runBundle.run);
+      await saveV2Controller(state.paths, state.controller);
+      return [];
+    }
+
     const clarificationRecords = [];
     for (const question of runtimeResult.result.questions ?? []) {
       if (question.toRole !== "manager") {
@@ -775,7 +790,17 @@ export class LongRunController {
         progressed = progressed || clarifications.length > 0;
       }
 
+      const postManagerBundle = await loadRunBundle(this.workspaceRoot, this.runId);
       const refreshed = await this.ensureInitialized();
+      if (
+        postManagerBundle.run.status === "paused" ||
+        postManagerBundle.run.pendingApproval?.required ||
+        hasOpenClarifications(refreshed.clarifications) ||
+        hasOpenHighPriorityQuestions(refreshed.questions)
+      ) {
+        return [];
+      }
+
       if (refreshed.tasks.length === 0 && !hasOpenClarifications(refreshed.clarifications)) {
         const plannedTaskIds = await this.runPlannerTaskGraphPass();
         progressed = progressed || plannedTaskIds.length > 0;

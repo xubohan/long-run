@@ -117,6 +117,87 @@ test("codex exec adapter parses structured task output and thread id", async () 
   assert.deepEqual(result.evidence, ["package.json:name=long-run"]);
 });
 
+test("codex exec adapter times out hanging child runs and returns a blocked result", async () => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "longrun-codex-adapter-"));
+  const seenSignals = [];
+
+  const spawnImpl = () => {
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.kill = (signal) => {
+      seenSignals.push(signal);
+      if (signal === "SIGTERM") {
+        setTimeout(() => child.emit("close", null, signal), 5);
+      }
+      return true;
+    };
+    child.stdin = {
+      write() {},
+      end() {},
+    };
+
+    return child;
+  };
+
+  const adapter = new CodexExecAdapter({
+    spawnImpl,
+    timeoutMsByRole: {
+      manager: 20,
+    },
+    killGraceMs: 5,
+  });
+
+  const result = await adapter.runTask({
+    agentSession: {
+      agentId: "agent-timeout-1",
+      role: "manager",
+      taskId: "task-timeout-1",
+      threadId: "",
+    },
+    envelope: {
+      systemPrompt: "System prompt",
+      taskPrompt: "Wait forever",
+    },
+    taskPacket: {
+      id: "task-timeout-1",
+      title: "Manager bootstrap",
+    },
+    template: {
+      developer_instructions: "Stay strict.",
+      sandbox_mode: "read-only",
+      model: "gpt-5.4",
+      model_reasoning_effort: "xhigh",
+      skills: { config: [] },
+      mcp_servers: {},
+      sandbox_workspace_write: null,
+    },
+    workspaceRoot,
+    runId: "run-timeout-1",
+  });
+
+  assert.deepEqual(seenSignals, ["SIGTERM"]);
+  assert.equal(result.status, "blocked");
+  assert.match(result.summary, /timed out/i);
+  assert.equal(result.role, "manager");
+});
+
+test("codex exec adapter picks up timeout overrides from environment by default", () => {
+  const previous = process.env.LONGRUN_NATIVE_AGENT_TIMEOUT_MANAGER_MS;
+  process.env.LONGRUN_NATIVE_AGENT_TIMEOUT_MANAGER_MS = "4321";
+
+  try {
+    const adapter = new CodexExecAdapter();
+    assert.equal(adapter.timeoutMsByRole.manager, 4321);
+  } finally {
+    if (previous === undefined) {
+      delete process.env.LONGRUN_NATIVE_AGENT_TIMEOUT_MANAGER_MS;
+    } else {
+      process.env.LONGRUN_NATIVE_AGENT_TIMEOUT_MANAGER_MS = previous;
+    }
+  }
+});
+
 test("child-agent output schema keeps optional role payloads nullable but required", async () => {
   const schemaPath = path.join(process.cwd(), "src/lib/child-agent-output-schema.json");
   const schema = JSON.parse(await readFile(schemaPath, "utf8"));

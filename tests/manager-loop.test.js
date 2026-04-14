@@ -170,6 +170,30 @@ class OverClarifyingManagerRuntimeAdapter extends ManagerPlanningRuntimeAdapter 
   }
 }
 
+class BlockedManagerRuntimeAdapter extends ManagerPlanningRuntimeAdapter {
+  async runTask(args) {
+    if (args.agentSession.role !== "manager") {
+      return super.runTask(args);
+    }
+
+    return {
+      agentId: args.agentSession.agentId,
+      taskId: args.taskPacket.id,
+      role: args.agentSession.role,
+      threadId: `thread-${args.agentSession.agentId}`,
+      status: "blocked",
+      summary: "Manager bootstrap timed out before it could finish clarifying.",
+      evidence: ["codex exec timed out for manager after 15000ms"],
+      filesTouched: [],
+      questions: [],
+      taskProposals: [],
+      staffing: [],
+      verification: null,
+      review: null,
+    };
+  }
+}
+
 class UnderstaffedPlannerRuntimeAdapter extends ManagerPlanningRuntimeAdapter {
   async runTask(args) {
     if (args.agentSession.role === "manager") {
@@ -375,6 +399,35 @@ test("manager clarification bootstrap rejects more than three blocking questions
       }),
     /maximum question budget/i,
   );
+});
+
+test("manager clarification bootstrap pauses the run when manager execution blocks", async () => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "longrun-manager-loop-"));
+  const adapter = new BlockedManagerRuntimeAdapter();
+  const runtime = new NativeAgentRuntime({ adapter });
+
+  const started = await startV2Run({
+    workspaceRoot,
+    missionInput: {
+      goal: "Pause when manager bootstrap cannot complete",
+      definitionOfDone: ["Blocked manager bootstrap does not leak into planning."],
+    },
+    workerConfig: {
+      sandbox: "workspace-write",
+      config: [],
+    },
+    runtime,
+    autoBootstrap: true,
+  });
+
+  const state = await loadV2ControllerState(workspaceRoot, started.run.runId);
+  const plannerCalls = adapter.calls.filter((call) => call.role === "planner");
+
+  assert.equal(started.run.status, "paused");
+  assert.match(started.run.pendingApproval.reason, /manager bootstrap blocked/i);
+  assert.equal(state.controller.currentPhase, "understanding");
+  assert.equal(state.tasks.length, 0);
+  assert.equal(plannerCalls.length, 0);
 });
 
 test("planner bootstrap rejects task proposals whose roles are missing from staffing", async () => {
