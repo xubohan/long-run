@@ -108,6 +108,7 @@ const ROLE_DEFAULTS = Object.freeze({
     roleInstructions: [
       "Verify against task acceptance checks and definition-of-done evidence.",
       "Return pass, fail, or unclear with concrete evidence.",
+      "When you complete, fill verification.status and verification.evidence in the structured result.",
       "Do not edit product code.",
     ],
   },
@@ -119,6 +120,7 @@ const ROLE_DEFAULTS = Object.freeze({
     roleInstructions: [
       "Review for code quality, structure, maintainability, and risk.",
       "Surface blocking findings clearly and avoid style-only comments unless they hide a real defect.",
+      "When you complete, fill review.status, review.summary, and review.findings in the structured result.",
       "Do not edit product code.",
     ],
   },
@@ -298,6 +300,7 @@ export function buildLongRunAgentTemplate({
       writeRoots: normalizedWriteRoots,
     }),
     buildCommunicationSection(communication),
+    "Structured output rules: Always return status, summary, evidence, filesTouched, questions, verification, and review. Use null for verification or review when your role does not own them or when the task did not complete.",
     buildRoleInstructions(roleDefinition, extraInstructions),
   ].join("\n\n");
 

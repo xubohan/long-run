@@ -3,6 +3,7 @@ import { buildRolePromptEnvelope } from "./common.js";
 const ROLE_SYSTEM_INSTRUCTIONS = `
 Verify against acceptance checks and accepted evidence.
 Return pass, fail, or unclear with concrete evidence.
+When status is completed, populate verification.status and verification.evidence.
 Do not edit product code.
 `;
 

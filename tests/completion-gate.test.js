@@ -19,6 +19,21 @@ class CompletionRuntimeAdapter {
       evidence: ["self-test:ok"],
       filesTouched: [],
       questions: [],
+      verification:
+        agentSession.role === "verifier"
+          ? {
+              status: "pass",
+              evidence: "Verifier confirmed all checks.",
+            }
+          : null,
+      review:
+        agentSession.role === "reviewer"
+          ? {
+              status: "pass",
+              summary: "Review green.",
+              findings: [],
+            }
+          : null,
     };
   }
 }
@@ -69,10 +84,6 @@ test("pure completion gate completes the run only after verifier, reviewer, and 
     },
   ]);
 
-  await controller.acceptTaskLevelVerifiedIntegration({
-    taskId: "task-complete-1",
-    verificationEvidence: "Verifier evidence mapped to DoD.",
-  });
   await controller.dispatchAssignments([
     {
       role: "reviewer",
@@ -83,10 +94,6 @@ test("pure completion gate completes the run only after verifier, reviewer, and 
       },
     },
   ]);
-  await controller.recordReviewPass({
-    taskId: "task-complete-1",
-    summary: "Review green.",
-  });
   await controller.managerAcceptTask({
     taskId: "task-complete-1",
   });

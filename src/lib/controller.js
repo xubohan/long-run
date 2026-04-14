@@ -17,14 +17,15 @@ import { createQuestion, answerQuestion, hasOpenHighPriorityQuestions } from "./
 import {
   createVerificationRecord,
   getLatestVerificationForTask,
+  hasFreshPassingTaskVerification,
   hasPassingTaskVerification,
 } from "./verification.js";
 import {
   createReviewFinding,
   createReviewPass,
+  hasFreshTaskReviewPass,
   hasBlockingReviewFindings,
   hasBlockingTaskReviewFindings,
-  hasTaskReviewPass,
   resolveReviewFinding,
 } from "./reviews.js";
 import { createAgentSessionRecord } from "./agent-registry.js";
@@ -250,17 +251,122 @@ function assertTaskReadyForVerification(taskRecord) {
   }
 }
 
-function ensureTaskCanAdvanceToManagerAcceptance(state, taskId) {
-  if (!hasPassingTaskVerification(state.verifications, taskId)) {
-    throw new Error(`Task ${taskId} cannot be accepted without a passing verifier result.`);
+function getLatestTaskTimestamp(records = [], taskId) {
+  return records
+    .filter((record) => record.taskId === taskId)
+    .map((record) => String(record.updatedAt || record.createdAt || ""))
+    .sort()
+    .at(-1) ?? "";
+}
+
+function buildSupportingRoleStatus(resultStatus) {
+  if (resultStatus === "needs_input") {
+    return "waiting_for_answer";
   }
 
-  if (!hasTaskReviewPass(state.reviews, taskId)) {
-    throw new Error(`Task ${taskId} cannot be accepted before reviewer coverage exists.`);
+  if (resultStatus === "retry_required") {
+    return "retry_required";
   }
 
-  if (hasBlockingTaskReviewFindings(state.reviews, taskId)) {
-    throw new Error(`Task ${taskId} has unresolved blocking review findings.`);
+  if (resultStatus === "blocked") {
+    return "blocked";
+  }
+
+  return "in_progress";
+}
+
+function hasFreshCompletedRoleRun(state, {
+  taskId,
+  role,
+  freshAfter = "",
+}) {
+  return state.agents.some(
+    (agent) =>
+      agent.taskId === taskId &&
+      agent.role === role &&
+      normalizeAgentRunStatus(agent.lastResultStatus) === "completed" &&
+      (
+        !String(freshAfter).trim() ||
+        getAgentFreshnessTimestamp(agent).localeCompare(String(freshAfter).trim()) >= 0
+      ),
+  );
+}
+
+function ensureTaskCanAdvanceToManagerAcceptance(state, taskRecord) {
+  if (taskRecord.stage !== "awaiting_manager_acceptance") {
+    throw new Error(
+      `Task ${taskRecord.id} cannot be accepted from stage ${taskRecord.stage}; manager acceptance requires awaiting_manager_acceptance.`,
+    );
+  }
+
+  if (
+    !hasFreshPassingTaskVerification(
+      state.verifications,
+      taskRecord.id,
+      taskRecord.lastExecutionCompletedAt,
+    )
+  ) {
+    throw new Error(
+      `Task ${taskRecord.id} cannot be accepted without fresh verifier coverage for the latest execution.`,
+    );
+  }
+
+  const latestVerification = getLatestVerificationForTask(state.verifications, taskRecord.id);
+  const reviewFreshAfter =
+    latestVerification?.updatedAt || latestVerification?.createdAt || "";
+
+  if (!hasFreshTaskReviewPass(state.reviews, taskRecord.id, reviewFreshAfter)) {
+    throw new Error(`Task ${taskRecord.id} cannot be accepted before fresh reviewer coverage exists.`);
+  }
+
+  if (hasBlockingTaskReviewFindings(state.reviews, taskRecord.id)) {
+    throw new Error(`Task ${taskRecord.id} has unresolved blocking review findings.`);
+  }
+}
+
+function assertTaskReadyForReview(state, taskRecord) {
+  if (!["reviewing", "awaiting_manager_acceptance"].includes(taskRecord.stage)) {
+    throw new Error(
+      `Task ${taskRecord.id} is not ready for reviewer review from stage ${taskRecord.stage}.`,
+    );
+  }
+
+  const latestVerification = getLatestVerificationForTask(
+    state.verifications,
+    taskRecord.id,
+  );
+
+  if (
+    latestVerification?.status !== "pass" ||
+    !String(latestVerification?.evidence || "").trim()
+  ) {
+    throw new Error(
+      `Task ${taskRecord.id} cannot be reviewed without a passing verifier result.`,
+    );
+  }
+}
+
+function deriveControllerPhase(taskRecord, resultStatus) {
+  if (resultStatus === "needs_input") {
+    return "waiting_for_answer";
+  }
+
+  switch (taskRecord.stage) {
+    case "self_testing":
+      return "self_testing";
+    case "verifying":
+      return "verifying";
+    case "reverifying":
+      return "reverifying";
+    case "reviewing":
+      return "reviewing";
+    case "fixing":
+      return "fixing";
+    case "awaiting_manager_acceptance":
+    case "delivered":
+      return "awaiting_manager_acceptance";
+    default:
+      return "implementing";
   }
 }
 
@@ -341,6 +447,7 @@ export class LongRunController {
 
     assertSingleWriter(assignments);
     const results = [];
+    let nextControllerPhase = state.controller.currentPhase || "planning";
 
     for (const assignment of assignments) {
       const taskPacket = { ...assignment.taskPacket };
@@ -352,6 +459,15 @@ export class LongRunController {
       });
       const existingTaskRecord = state.tasks.find((task) => task.id === taskPacket.id);
       const taskRecord = hydrateTaskRecord(existingTaskRecord, taskPacket);
+
+      if (assignment.role === "verifier") {
+        assertTaskReadyForVerification(taskRecord);
+      }
+
+      if (assignment.role === "reviewer") {
+        assertTaskReadyForReview(state, taskRecord);
+      }
+
       updateTaskGraphWithTask(state.taskGraph, taskRecord);
       await writeV2Record(state.paths.tasksDir, taskRecord);
       syncCollectionRecord(state.tasks, taskRecord);
@@ -420,28 +536,84 @@ export class LongRunController {
         const supportingRole = assignment.role;
         if (supportingRole === "verifier") {
           taskRecord.stage = "verifying";
-          setTaskStatus(
-            taskRecord,
-            runtimeResult.result.status === "needs_input"
-              ? "waiting_for_answer"
-              : runtimeResult.result.status === "retry_required"
-                ? "retry_required"
-                : runtimeResult.result.status === "blocked"
-                  ? "blocked"
-                  : "in_progress",
-          );
+          setTaskStatus(taskRecord, buildSupportingRoleStatus(runtimeResult.result.status));
+
+          if (runtimeResult.result.status === "completed") {
+            if (!runtimeResult.result.verification) {
+              throw new Error(
+                `Verifier task ${taskPacket.id} must return verification.status and verification.evidence.`,
+              );
+            }
+
+            const verification = createVerificationRecord({
+              taskId: taskPacket.id,
+              status: runtimeResult.result.verification.status,
+              evidence: runtimeResult.result.verification.evidence,
+              actorRole: "verifier",
+              actorAgentId: agentSession.agentId,
+            });
+            await writeV2Record(state.paths.verificationsDir, verification);
+            syncCollectionRecord(state.verifications, verification);
+
+            if (runtimeResult.result.verification.status === "pass") {
+              taskRecord.stage = "reviewing";
+              setTaskStatus(taskRecord, "in_progress");
+            } else {
+              taskRecord.stage = "fixing";
+              setTaskStatus(taskRecord, "retry_required");
+            }
+          }
         } else if (supportingRole === "reviewer") {
           taskRecord.stage = "reviewing";
-          setTaskStatus(
-            taskRecord,
-            runtimeResult.result.status === "needs_input"
-              ? "waiting_for_answer"
-              : runtimeResult.result.status === "retry_required"
-                ? "retry_required"
-                : runtimeResult.result.status === "blocked"
-                  ? "blocked"
-                  : "in_progress",
-          );
+          setTaskStatus(taskRecord, buildSupportingRoleStatus(runtimeResult.result.status));
+
+          if (runtimeResult.result.status === "completed") {
+            if (!runtimeResult.result.review) {
+              throw new Error(
+                `Reviewer task ${taskPacket.id} must return review.status, review.summary, and review.findings.`,
+              );
+            }
+
+            if (runtimeResult.result.review.status === "pass") {
+              const reviewPass = createReviewPass({
+                taskId: taskPacket.id,
+                summary: runtimeResult.result.review.summary,
+                actorRole: "reviewer",
+                actorAgentId: agentSession.agentId,
+              });
+              await writeV2Record(state.paths.reviewsDir, reviewPass);
+              syncCollectionRecord(state.reviews, reviewPass);
+
+              if (hasPassingTaskVerification(state.verifications, taskPacket.id)) {
+                taskRecord.stage = "awaiting_manager_acceptance";
+                setTaskStatus(taskRecord, "in_progress");
+              }
+            } else {
+              const findings = runtimeResult.result.review.findings?.length
+                ? runtimeResult.result.review.findings
+                : [
+                    {
+                      summary: runtimeResult.result.review.summary,
+                      severity: "medium",
+                    },
+                  ];
+
+              for (const findingInput of findings) {
+                const finding = createReviewFinding({
+                  taskId: taskPacket.id,
+                  summary: findingInput.summary,
+                  severity: findingInput.severity,
+                  actorRole: "reviewer",
+                  actorAgentId: agentSession.agentId,
+                });
+                await writeV2Record(state.paths.reviewsDir, finding);
+                syncCollectionRecord(state.reviews, finding);
+              }
+
+              taskRecord.stage = "fixing";
+              setTaskStatus(taskRecord, "retry_required");
+            }
+          }
         } else if (runtimeResult.result.status === "completed") {
           setTaskStatus(taskRecord, "accepted");
           taskRecord.stage = "delivered";
@@ -456,6 +628,10 @@ export class LongRunController {
       await writeV2Record(state.paths.tasksDir, taskRecord);
       updateTaskGraphWithTask(state.taskGraph, taskRecord);
       syncCollectionRecord(state.tasks, taskRecord);
+      nextControllerPhase = deriveControllerPhase(
+        taskRecord,
+        runtimeResult.result.status,
+      );
 
       results.push({
         agentSession,
@@ -465,7 +641,7 @@ export class LongRunController {
     }
 
     await saveV2TaskGraph(state.paths, state.taskGraph);
-    state.controller.currentPhase = "implementing";
+    state.controller.currentPhase = nextControllerPhase;
     await saveV2Controller(state.paths, state.controller);
 
     return results;
@@ -636,6 +812,7 @@ export class LongRunController {
   async recordReviewPass({ taskId, summary = "Review passed.", actorAgentId = "" }) {
     const state = await this.ensureInitialized();
     const taskRecord = getTaskRecord(state, taskId);
+    assertTaskReadyForReview(state, taskRecord);
     const latestVerification = getLatestVerificationForTask(state.verifications, taskId);
     const reviewerSession = assertCompletedActorSession(state, {
       taskId,
@@ -684,9 +861,10 @@ export class LongRunController {
         finding.taskId,
       ) &&
       hasPassingTaskVerification(state.verifications, finding.taskId) &&
-      hasTaskReviewPass(
+      hasFreshTaskReviewPass(
         state.reviews.map((review) => (review.id === finding.id ? finding : review)),
         finding.taskId,
+        getLatestTaskTimestamp(state.verifications, finding.taskId),
       )
     ) {
       taskRecord.stage = "awaiting_manager_acceptance";
@@ -733,11 +911,15 @@ export class LongRunController {
       throw new Error("Manager cannot accept while high-priority questions remain open.");
     }
 
-    ensureTaskCanAdvanceToManagerAcceptance(state, taskId);
+    ensureTaskCanAdvanceToManagerAcceptance(state, taskRecord);
 
     const latestVerification = getLatestVerificationForTask(state.verifications, taskId);
     if (!latestVerification?.evidence) {
       throw new Error(`Task ${taskId} cannot be accepted without verification evidence.`);
+    }
+
+    if (!state.controller.acceptedEvidence.includes(latestVerification.evidence)) {
+      state.controller.acceptedEvidence.push(latestVerification.evidence);
     }
 
     setTaskStatus(taskRecord, "accepted");
@@ -750,6 +932,77 @@ export class LongRunController {
     await saveV2Controller(state.paths, state.controller);
 
     return taskRecord;
+  }
+
+  async continueReadyTasks() {
+    const state = await this.ensureInitialized();
+
+    if (
+      hasOpenClarifications(state.clarifications) ||
+      hasOpenHighPriorityQuestions(state.questions)
+    ) {
+      return [];
+    }
+
+    const assignments = [];
+
+    for (const task of state.tasks) {
+      if (task.status === "cancelled" || task.stage === "delivered") {
+        continue;
+      }
+
+      if (
+        ["self_testing", "reverifying"].includes(task.stage) &&
+        !hasFreshCompletedRoleRun(state, {
+          taskId: task.id,
+          role: "verifier",
+          freshAfter: task.lastExecutionCompletedAt,
+        })
+      ) {
+        assignments.push({
+          role: "verifier",
+          taskPacket: {
+            id: task.id,
+            title: `Verify ${task.title}`,
+            objective: `Validate the latest self-test evidence for task ${task.id}.`,
+            acceptanceChecks: task.acceptanceChecks ?? [],
+          },
+        });
+        continue;
+      }
+
+      if (
+        task.stage === "reviewing" &&
+        hasPassingTaskVerification(state.verifications, task.id) &&
+        !hasBlockingTaskReviewFindings(state.reviews, task.id) &&
+        !hasFreshTaskReviewPass(
+          state.reviews,
+          task.id,
+          getLatestTaskTimestamp(state.verifications, task.id),
+        ) &&
+        !hasFreshCompletedRoleRun(state, {
+          taskId: task.id,
+          role: "reviewer",
+          freshAfter: getLatestTaskTimestamp(state.verifications, task.id),
+        })
+      ) {
+        assignments.push({
+          role: "reviewer",
+          taskPacket: {
+            id: task.id,
+            title: `Review ${task.title}`,
+            objective: `Review the latest verified state for task ${task.id}.`,
+            acceptanceChecks: task.acceptanceChecks ?? [],
+          },
+        });
+      }
+    }
+
+    if (assignments.length === 0) {
+      return [];
+    }
+
+    return this.dispatchAssignments(assignments);
   }
 
   async finalizeRunIfDeliverable() {
@@ -820,6 +1073,7 @@ export async function startV2Run({
   workspaceRoot,
   missionInput,
   workerConfig,
+  runtime,
 }) {
   const mission = createMissionLock({
     workspaceRoot,
@@ -844,8 +1098,10 @@ export async function startV2Run({
     workspaceRoot,
     runId: state.runId,
     missionDigest: mission.digest,
+    runtime,
   });
 
+  await controller.continueReadyTasks();
   return controller.loadRunBundle();
 }
 
@@ -861,14 +1117,17 @@ export async function loadV2Status(workspaceRoot, runId) {
 export async function resumeV2Run({
   workspaceRoot,
   runId,
+  runtime,
 }) {
   const bundle = await loadRunBundle(workspaceRoot, runId);
   const controller = new LongRunController({
     workspaceRoot,
     runId,
     missionDigest: bundle.mission.digest,
+    runtime,
   });
   await controller.ensureInitialized();
+  await controller.continueReadyTasks();
   return controller.finalizeRunIfDeliverable();
 }
 

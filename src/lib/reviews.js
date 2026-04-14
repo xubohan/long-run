@@ -94,3 +94,35 @@ export function hasTaskReviewPass(findings = [], taskId) {
       Boolean(String(finding.actorAgentId ?? "").trim()),
   );
 }
+
+export function getLatestTaskReviewPass(findings = [], taskId) {
+  return findings
+    .filter(
+      (finding) =>
+        finding.taskId === taskId &&
+        finding.kind === "pass" &&
+        finding.status === "resolved" &&
+        finding.actorRole === "reviewer" &&
+        Boolean(String(finding.actorAgentId ?? "").trim()),
+    )
+    .sort((left, right) =>
+      String(right.updatedAt || right.createdAt || "").localeCompare(
+        String(left.updatedAt || left.createdAt || ""),
+      ),
+    )[0] ?? null;
+}
+
+export function hasFreshTaskReviewPass(findings = [], taskId, freshAfter = "") {
+  const latest = getLatestTaskReviewPass(findings, taskId);
+  if (!latest) {
+    return false;
+  }
+
+  const freshnessFloor = String(freshAfter ?? "").trim();
+  if (!freshnessFloor) {
+    return true;
+  }
+
+  const latestTs = String(latest.updatedAt || latest.createdAt || "");
+  return latestTs.localeCompare(freshnessFloor) >= 0;
+}

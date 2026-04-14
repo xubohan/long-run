@@ -31,6 +31,21 @@ class FakeRuntimeAdapter {
       evidence: [`evidence:${taskPacket.id}`],
       filesTouched: [],
       questions: [],
+      verification:
+        agentSession.role === "verifier"
+          ? {
+              status: "pass",
+              evidence: `Verifier confirmed ${taskPacket.id}.`,
+            }
+          : null,
+      review:
+        agentSession.role === "reviewer"
+          ? {
+              status: "pass",
+              summary: `Reviewer approved ${taskPacket.id}.`,
+              findings: [],
+            }
+          : null,
     };
   }
 
@@ -84,7 +99,7 @@ test("controller dispatch creates at least two isolated child agent sessions", a
   assert.notEqual(results[0].envelope.taskPrompt, results[1].envelope.taskPrompt);
 });
 
-test("controller can accept a task-level verified integration", async () => {
+test("controller advances executor work into reviewing after verifier automation", async () => {
   const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "longrun-controller-"));
   const runtime = new NativeAgentRuntime({
     adapter: new FakeRuntimeAdapter(),
@@ -109,10 +124,6 @@ test("controller can accept a task-level verified integration", async () => {
     },
   ]);
 
-  await controller.ensureAgentSession({
-    role: "verifier",
-    taskId: "task-executor-1",
-  });
   await controller.dispatchAssignments([
     {
       role: "verifier",
@@ -124,13 +135,100 @@ test("controller can accept a task-level verified integration", async () => {
     },
   ]);
 
-  const acceptedTask = await controller.acceptTaskLevelVerifiedIntegration({
-    taskId: "task-executor-1",
-    verificationEvidence: "Verifier confirmed task-level integration.",
+  const state = await loadV2ControllerState(workspaceRoot, "run-controller-2");
+  assert.equal(state.verifications.length, 1);
+  assert.equal(state.tasks[0].status, "in_progress");
+  assert.equal(state.tasks[0].stage, "reviewing");
+});
+
+test("dispatching a verifier task auto-records the verification verdict", async () => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "longrun-controller-"));
+  const runtime = new NativeAgentRuntime({
+    adapter: new FakeRuntimeAdapter(),
+  });
+  const controller = new LongRunController({
+    workspaceRoot,
+    runId: "run-controller-6",
+    missionDigest: "digest-6",
+    runtime,
   });
 
-  assert.equal(acceptedTask.status, "in_progress");
-  assert.equal(acceptedTask.stage, "reviewing");
+  await controller.dispatchAssignments([
+    {
+      role: "executor",
+      taskPacket: {
+        id: "task-executor-6",
+        title: "Implement feature gate",
+        objective: "Add the feature gate safely",
+        allowedFiles: ["src/lib/auditor.js"],
+      },
+    },
+  ]);
+
+  await controller.dispatchAssignments([
+    {
+      role: "verifier",
+      taskPacket: {
+        id: "task-executor-6",
+        title: "Verify feature gate",
+      },
+    },
+  ]);
+
+  const state = await loadV2ControllerState(workspaceRoot, "run-controller-6");
+  assert.equal(state.verifications.length, 1);
+  assert.equal(state.verifications[0].status, "pass");
+  assert.equal(state.tasks[0].stage, "reviewing");
+  assert.equal(state.controller.currentPhase, "reviewing");
+});
+
+test("dispatching a reviewer task auto-records review approval", async () => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "longrun-controller-"));
+  const runtime = new NativeAgentRuntime({
+    adapter: new FakeRuntimeAdapter(),
+  });
+  const controller = new LongRunController({
+    workspaceRoot,
+    runId: "run-controller-7",
+    missionDigest: "digest-7",
+    runtime,
+  });
+
+  await controller.dispatchAssignments([
+    {
+      role: "executor",
+      taskPacket: {
+        id: "task-executor-7",
+        title: "Implement feature gate",
+        objective: "Add the feature gate safely",
+        allowedFiles: ["src/lib/auditor.js"],
+      },
+    },
+  ]);
+  await controller.dispatchAssignments([
+    {
+      role: "verifier",
+      taskPacket: {
+        id: "task-executor-7",
+        title: "Verify feature gate",
+      },
+    },
+  ]);
+  await controller.dispatchAssignments([
+    {
+      role: "reviewer",
+      taskPacket: {
+        id: "task-executor-7",
+        title: "Review feature gate",
+      },
+    },
+  ]);
+
+  const state = await loadV2ControllerState(workspaceRoot, "run-controller-7");
+  assert.equal(state.reviews.length, 1);
+  assert.equal(state.reviews[0].kind, "pass");
+  assert.equal(state.tasks[0].stage, "awaiting_manager_acceptance");
+  assert.equal(state.controller.currentPhase, "awaiting_manager_acceptance");
 });
 
 test("controller rejects verifier pass when executor self-test evidence is missing", async () => {
@@ -172,6 +270,33 @@ test("controller rejects verifier pass when executor self-test evidence is missi
         },
       ]),
     /self-test evidence/i,
+  );
+});
+
+test("controller rejects verifier dispatch before executor self-test evidence exists", async () => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "longrun-controller-"));
+  const runtime = new NativeAgentRuntime({
+    adapter: new FakeRuntimeAdapter(),
+  });
+  const controller = new LongRunController({
+    workspaceRoot,
+    runId: "run-controller-verifier-direct",
+    missionDigest: "digest-direct-verifier",
+    runtime,
+  });
+
+  await assert.rejects(
+    () =>
+      controller.dispatchAssignments([
+        {
+          role: "verifier",
+          taskPacket: {
+            id: "task-verifier-direct",
+            title: "Verify without executor evidence",
+          },
+        },
+      ]),
+    /not ready for verifier review|cannot be verified without self-test evidence/i,
   );
 });
 

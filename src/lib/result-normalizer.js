@@ -21,6 +21,23 @@ export const CHILD_AGENT_PRIORITIES = Object.freeze([
   "high",
 ]);
 
+export const VERIFIER_VERDICTS = Object.freeze([
+  "pass",
+  "fail",
+  "unclear",
+]);
+
+export const REVIEW_VERDICTS = Object.freeze([
+  "pass",
+  "fail",
+]);
+
+export const REVIEW_SEVERITIES = Object.freeze([
+  "low",
+  "medium",
+  "high",
+]);
+
 export function normalizeChildAgentResult(result, context = {}) {
   return {
     agentId: normalizeString(result?.agentId || context.agentId),
@@ -37,6 +54,7 @@ export function normalizeChildAgentResult(result, context = {}) {
       toRole: normalizeString(question?.toRole),
     })),
     verification: result?.verification ?? null,
+    review: result?.review ?? null,
   };
 }
 
@@ -81,6 +99,21 @@ export function validateNormalizedChildAgentResult(result, context = {}) {
     assertValue(question.question, "questions[].question");
     assertValue(question.toRole, "questions[].toRole");
     assertEnum(question.priority, CHILD_AGENT_PRIORITIES, "questions[].priority");
+  }
+
+  if (result?.verification) {
+    assertEnum(result.verification.status, VERIFIER_VERDICTS, "verification.status");
+    assertValue(result.verification.evidence, "verification.evidence");
+  }
+
+  if (result?.review) {
+    assertEnum(result.review.status, REVIEW_VERDICTS, "review.status");
+    assertValue(result.review.summary, "review.summary");
+
+    for (const finding of result.review.findings ?? []) {
+      assertValue(finding.summary, "review.findings[].summary");
+      assertEnum(finding.severity, REVIEW_SEVERITIES, "review.findings[].severity");
+    }
   }
 
   return result;

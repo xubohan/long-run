@@ -105,6 +105,31 @@ export function hasPassingTaskVerification(verifications = [], taskId) {
   );
 }
 
+export function hasFreshPassingTaskVerification(
+  verifications = [],
+  taskId,
+  freshAfter = "",
+) {
+  const latest = getLatestVerificationForTask(verifications, taskId);
+  if (
+    !latest ||
+    latest.status !== "pass" ||
+    !trimText(latest.evidence) ||
+    latest.actorRole !== "verifier" ||
+    !trimText(latest.actorAgentId)
+  ) {
+    return false;
+  }
+
+  const freshnessFloor = trimText(freshAfter);
+  if (!freshnessFloor) {
+    return true;
+  }
+
+  const latestTs = String(latest.updatedAt || latest.createdAt || "");
+  return latestTs.localeCompare(freshnessFloor) >= 0;
+}
+
 export function hasBlockingVerificationFindings(verifications = []) {
   const latestByTask = new Map();
 

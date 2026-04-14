@@ -14,7 +14,19 @@ import { loadV2ControllerState } from "../src/lib/controller-state.js";
 import { NativeAgentRuntime } from "../src/lib/native-agent-runtime.js";
 
 class EndToEndRuntimeAdapter {
+  constructor() {
+    this.verifierAttempts = new Map();
+  }
+
   async runTask({ agentSession, taskPacket, envelope }) {
+    const verifierAttempt =
+      agentSession.role === "verifier"
+        ? (this.verifierAttempts.get(taskPacket.id) ?? 0) + 1
+        : 0;
+    if (agentSession.role === "verifier") {
+      this.verifierAttempts.set(taskPacket.id, verifierAttempt);
+    }
+
     return {
       agentId: agentSession.agentId,
       taskId: taskPacket.id,
@@ -26,6 +38,24 @@ class EndToEndRuntimeAdapter {
       filesTouched: agentSession.role === "executor" ? ["src/lib/controller.js"] : [],
       questions: [],
       envelopeDigest: `${envelope.role}:${taskPacket.id}`,
+      verification:
+        agentSession.role === "verifier"
+          ? {
+              status: verifierAttempt === 1 ? "fail" : "pass",
+              evidence:
+                verifierAttempt === 1
+                  ? `Verifier found a missing fix path for ${taskPacket.id}.`
+                  : `Verifier confirmed ${taskPacket.id}.`,
+            }
+          : null,
+      review:
+        agentSession.role === "reviewer"
+          ? {
+              status: "pass",
+              summary: `Reviewer approved ${taskPacket.id}.`,
+              findings: [],
+            }
+          : null,
     };
   }
 
@@ -137,12 +167,6 @@ test("v2 e2e flow enforces clarification, relay, verifier/reviewer gates, resume
     priority: "high",
   });
   assert.match(relay.answerRecord.answer, /answer-from-observer/);
-
-  await controller.recordVerification({
-    taskId: "task-executor",
-    status: "fail",
-    evidence: "Verifier found a missing fix path.",
-  });
   const finding = await controller.recordReviewFinding({
     taskId: "task-executor",
     summary: "Reviewer requires a cleaner relay contract.",
@@ -188,10 +212,6 @@ test("v2 e2e flow enforces clarification, relay, verifier/reviewer gates, resume
     },
   ]);
 
-  await resumedController.acceptTaskLevelVerifiedIntegration({
-    taskId: "task-executor",
-    verificationEvidence: "Verifier reran after fix and mapped evidence to DoD.",
-  });
   await resumedController.resolveReviewFinding({ findingId: finding.id });
   await resumedController.dispatchAssignments([
     {
@@ -203,10 +223,6 @@ test("v2 e2e flow enforces clarification, relay, verifier/reviewer gates, resume
       },
     },
   ]);
-  await resumedController.recordReviewPass({
-    taskId: "task-executor",
-    summary: "Reviewer reran after fix and approved the task.",
-  });
   await resumedController.managerAcceptTask({
     taskId: "task-executor",
   });

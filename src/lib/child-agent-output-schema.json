@@ -7,7 +7,9 @@
     "summary",
     "evidence",
     "filesTouched",
-    "questions"
+    "questions",
+    "verification",
+    "review"
   ],
   "properties": {
     "status": {
@@ -41,6 +43,54 @@
           "toRole": {
             "type": "string",
             "enum": ["manager", "planner", "observer", "executor", "verifier", "reviewer"]
+          }
+        }
+      }
+    },
+    "verification": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["status", "evidence"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["pass", "fail", "unclear"]
+        },
+        "evidence": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "review": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["status", "summary", "findings"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["pass", "fail"]
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["summary", "severity"],
+            "properties": {
+              "summary": {
+                "type": "string",
+                "minLength": 1
+              },
+              "severity": {
+                "type": "string",
+                "enum": ["low", "medium", "high"]
+              }
+            }
           }
         }
       }

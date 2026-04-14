@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { EventEmitter } from "node:events";
 
 import {
@@ -59,6 +59,8 @@ test("codex exec adapter parses structured task output and thread id", async () 
               evidence: ["package.json:name=long-run"],
               filesTouched: [],
               questions: [],
+              verification: null,
+              review: null,
             }),
           ),
         ).then(() => {
@@ -111,4 +113,21 @@ test("codex exec adapter parses structured task output and thread id", async () 
   assert.equal(result.threadId, "thread-smoke-1");
   assert.equal(result.status, "completed");
   assert.deepEqual(result.evidence, ["package.json:name=long-run"]);
+});
+
+test("child-agent output schema keeps optional role payloads nullable but required", async () => {
+  const schemaPath = path.join(process.cwd(), "src/lib/child-agent-output-schema.json");
+  const schema = JSON.parse(await readFile(schemaPath, "utf8"));
+
+  assert.deepEqual(schema.required, [
+    "status",
+    "summary",
+    "evidence",
+    "filesTouched",
+    "questions",
+    "verification",
+    "review",
+  ]);
+  assert.deepEqual(schema.properties.verification.type, ["object", "null"]);
+  assert.deepEqual(schema.properties.review.type, ["object", "null"]);
 });

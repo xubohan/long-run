@@ -115,6 +115,8 @@ function normalizeChildOutput(output) {
       output?.files_touched ??
       [],
     questions: Array.isArray(output?.questions) ? output.questions : [],
+    verification: output?.verification ?? null,
+    review: output?.review ?? null,
   };
 }
 
