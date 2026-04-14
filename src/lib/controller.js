@@ -285,6 +285,26 @@ function buildSupportingRoleStatus(resultStatus) {
   return "in_progress";
 }
 
+function isActiveDispatchedTask(task) {
+  return (
+    task.stage !== "delivered" &&
+    !["queued", "accepted", "cancelled"].includes(task.status)
+  );
+}
+
+function getRoleDispatchLimit(staffingPlan = [], role) {
+  const staffingEntry = (staffingPlan ?? []).find(
+    (entry) => entry.role === role,
+  );
+  const plannedCount = staffingEntry?.count ?? null;
+
+  if (role === "executor") {
+    return plannedCount == null ? 1 : Math.min(plannedCount, 1);
+  }
+
+  return plannedCount;
+}
+
 function hasFreshCompletedRoleRun(state, {
   taskId,
   role,
@@ -645,33 +665,40 @@ export class LongRunController {
       return [];
     }
 
-    const hasActiveWriter = state.tasks.some(
-      (task) =>
-        task.ownerRole === "executor" &&
-        ["dispatched", "in_progress", "waiting_for_answer", "retry_required", "blocked"].includes(task.status) &&
-        task.stage !== "delivered",
-    );
+    const activeRoleCounts = new Map();
+    for (const task of state.tasks) {
+      if (!isActiveDispatchedTask(task)) {
+        continue;
+      }
+
+      const role = task.ownerRole || "executor";
+      activeRoleCounts.set(role, (activeRoleCounts.get(role) ?? 0) + 1);
+    }
 
     const assignments = [];
+    const queuedRoleCounts = new Map();
 
     for (const task of state.tasks) {
       if (task.status !== "queued") {
         continue;
       }
 
-      if (task.ownerRole === "executor") {
-        if (hasActiveWriter || assignments.some((assignment) => assignment.role === "executor")) {
-          continue;
-        }
+      const role = task.ownerRole || "executor";
+      const roleLimit = getRoleDispatchLimit(state.controller.staffingPlan, role);
+      const activeCount = activeRoleCounts.get(role) ?? 0;
+      const queuedCount = queuedRoleCounts.get(role) ?? 0;
+
+      if (roleLimit != null && activeCount + queuedCount >= roleLimit) {
+        continue;
       }
 
       assignments.push({
-        role: task.ownerRole || "executor",
+        role,
         taskPacket: {
           id: task.id,
           title: task.title,
           objective: task.objective,
-          ownerRole: task.ownerRole || "executor",
+          ownerRole: role,
           dependencies: task.dependencies ?? [],
           acceptanceChecks: task.acceptanceChecks ?? [],
           readRoots: task.readRoots ?? [],
@@ -680,6 +707,7 @@ export class LongRunController {
         },
         acceptedAnswers: getAnsweredClarificationSummaries(state.clarifications),
       });
+      queuedRoleCounts.set(role, queuedCount + 1);
     }
 
     if (assignments.length === 0) {

@@ -5,8 +5,14 @@ import path from "node:path";
 import { mkdtemp } from "node:fs/promises";
 
 import { LongRunController } from "../src/lib/controller.js";
-import { loadV2ControllerState } from "../src/lib/controller-state.js";
+import {
+  loadV2ControllerState,
+  saveV2Controller,
+  saveV2TaskGraph,
+  writeV2Record,
+} from "../src/lib/controller-state.js";
 import { NativeAgentRuntime } from "../src/lib/native-agent-runtime.js";
+import { createTaskGraph, createV2Task } from "../src/lib/task-graph.js";
 
 class FakeRuntimeAdapter {
   constructor() {
@@ -59,6 +65,35 @@ class FakeRuntimeAdapter {
   }
 }
 
+class StaffingAwareRuntimeAdapter extends FakeRuntimeAdapter {
+  async runTask({ agentSession, envelope, taskPacket }) {
+    this.calls.push({
+      agentId: agentSession.agentId,
+      role: agentSession.role,
+      taskId: taskPacket.id,
+      envelope,
+    });
+
+    if (agentSession.role === "observer") {
+      return {
+        agentId: agentSession.agentId,
+        taskId: taskPacket.id,
+        role: agentSession.role,
+        threadId: `thread-${agentSession.agentId}`,
+        status: "needs_input",
+        summary: `Observer ${taskPacket.id} is still working.`,
+        evidence: [],
+        filesTouched: [],
+        questions: [],
+        verification: null,
+        review: null,
+      };
+    }
+
+    return super.runTask({ agentSession, envelope, taskPacket });
+  }
+}
+
 test("controller dispatch creates at least two isolated child agent sessions", async () => {
   const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "longrun-controller-"));
   const runtime = new NativeAgentRuntime({
@@ -97,6 +132,57 @@ test("controller dispatch creates at least two isolated child agent sessions", a
   assert.notEqual(state.agents[0].historyKey, state.agents[1].historyKey);
   assert.equal(results[0].envelope.systemPrompt, results[1].envelope.systemPrompt);
   assert.notEqual(results[0].envelope.taskPrompt, results[1].envelope.taskPrompt);
+});
+
+test("dispatchQueuedTasks respects staffing limits for active same-role agents", async () => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "longrun-controller-"));
+  const adapter = new StaffingAwareRuntimeAdapter();
+  const runtime = new NativeAgentRuntime({ adapter });
+  const controller = new LongRunController({
+    workspaceRoot,
+    runId: "run-controller-staffing",
+    missionDigest: "digest-staffing",
+    runtime,
+  });
+
+  const state = await controller.ensureInitialized();
+  state.controller.staffingPlan = [
+    {
+      role: "observer",
+      count: 1,
+      rationale: "Run one observer at a time.",
+    },
+  ];
+  await saveV2Controller(state.paths, state.controller);
+
+  const observerA = createV2Task({
+    id: "task-observer-limit-a",
+    title: "Observe A",
+    ownerRole: "observer",
+    stage: "understanding",
+    status: "queued",
+  });
+  const observerB = createV2Task({
+    id: "task-observer-limit-b",
+    title: "Observe B",
+    ownerRole: "observer",
+    stage: "understanding",
+    status: "queued",
+  });
+  await writeV2Record(state.paths.tasksDir, observerA);
+  await writeV2Record(state.paths.tasksDir, observerB);
+  await saveV2TaskGraph(state.paths, createTaskGraph([observerA, observerB]));
+
+  const results = await controller.dispatchQueuedTasks();
+  const reloaded = await loadV2ControllerState(workspaceRoot, "run-controller-staffing");
+  const waitingTasks = reloaded.tasks.filter((task) => task.status === "waiting_for_answer");
+  const queuedTasks = reloaded.tasks.filter((task) => task.status === "queued");
+
+  assert.equal(results.length, 1);
+  assert.equal(adapter.calls.length, 1);
+  assert.equal(adapter.calls[0].role, "observer");
+  assert.equal(waitingTasks.length, 1);
+  assert.equal(queuedTasks.length, 1);
 });
 
 test("controller advances executor work into reviewing after verifier automation", async () => {
