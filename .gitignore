@@ -2,3 +2,4 @@
 .long-run/
 node_modules/
 .omx/
+.codex/

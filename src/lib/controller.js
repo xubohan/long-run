@@ -201,6 +201,8 @@ export class LongRunController {
         missionDigest: this.missionDigest,
         taskPacket,
         acceptedAnswers: assignment.acceptedAnswers ?? [],
+        workspaceRoot: this.workspaceRoot,
+        runId: this.runId,
       });
 
       assertFilesWithinScope(taskPacket, runtimeResult.result);
@@ -316,6 +318,8 @@ export class LongRunController {
       missionDigest: this.missionDigest,
       taskPacket: taskRecord,
       acceptedAnswers,
+      workspaceRoot: this.workspaceRoot,
+      runId: this.runId,
     });
 
     await writeJson(path.join(state.paths.answersDir, `${answerRecord.id}.json`), answerRecord);

@@ -1,0 +1,49 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "status",
+    "summary",
+    "evidence",
+    "filesTouched",
+    "questions"
+  ],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["completed", "blocked", "needs_input", "retry_required"]
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "evidence": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "filesTouched": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "questions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["question", "priority", "toRole"],
+        "properties": {
+          "question": { "type": "string", "minLength": 1 },
+          "priority": {
+            "type": "string",
+            "enum": ["low", "medium", "high"]
+          },
+          "toRole": {
+            "type": "string",
+            "enum": ["manager", "planner", "observer", "executor", "verifier", "reviewer"]
+          }
+        }
+      }
+    }
+  }
+}

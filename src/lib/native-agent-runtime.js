@@ -4,31 +4,35 @@ import {
 } from "./native-agent-template.js";
 import { buildRolePromptEnvelope } from "./agent-registry.js";
 import { normalizeChildAgentResult } from "./result-normalizer.js";
+import { CodexExecAdapter } from "./codex-exec-adapter.js";
+
+function dedupeStrings(values = []) {
+  return Array.from(
+    new Set(
+      values
+        .map((value) => String(value ?? "").trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+function toParentDirectories(filePaths = []) {
+  return dedupeStrings(
+    filePaths.map((filePath) => {
+      const normalized = String(filePath ?? "").trim();
+      const lastSlash = normalized.lastIndexOf("/");
+      if (lastSlash <= 0) {
+        return ".";
+      }
+
+      return normalized.slice(0, lastSlash);
+    }),
+  );
+}
 
 export class NativeAgentRuntime {
   constructor({ adapter, templateLayerOptions = {} } = {}) {
-    this.adapter = adapter ?? {
-      async runTask({ agentSession }) {
-        return {
-          agentId: agentSession.agentId,
-          taskId: agentSession.taskId,
-          role: agentSession.role,
-          status: "completed",
-          summary: "No adapter result provided.",
-          evidence: [],
-          filesTouched: [],
-          questions: [],
-        };
-      },
-      async answerQuestion({ questionRecord, targetSession }) {
-        return {
-          id: `answer-${questionRecord.id}`,
-          questionId: questionRecord.id,
-          fromAgentId: targetSession.agentId,
-          answer: "No adapter answer provided.",
-        };
-      },
-    };
+    this.adapter = adapter ?? new CodexExecAdapter();
     this.templateLayerOptions = templateLayerOptions;
   }
 
@@ -63,6 +67,8 @@ export class NativeAgentRuntime {
     missionDigest,
     taskPacket,
     acceptedAnswers = [],
+    workspaceRoot = process.cwd(),
+    runId = "adhoc-run",
   }) {
     const envelope = buildRolePromptEnvelope({
       role: agentSession.role,
@@ -70,11 +76,28 @@ export class NativeAgentRuntime {
       taskPacket,
       acceptedAnswers,
     });
+    const template = this.buildTemplateForRole({
+      role: agentSession.role,
+      readRoots: taskPacket.readRoots ?? toParentDirectories(taskPacket.allowedFiles),
+      writeRoots:
+        agentSession.role === "executor"
+          ? toParentDirectories(taskPacket.allowedFiles)
+          : [],
+      communication: {
+        mode: "controller-relay",
+      },
+    });
+    this.materializeTemplates({
+      targetDir: `${workspaceRoot}/.codex/agents`,
+    });
 
     const rawResult = await this.adapter.runTask({
       agentSession,
       envelope,
       taskPacket,
+      template,
+      workspaceRoot,
+      runId,
     });
 
     return {
@@ -93,6 +116,8 @@ export class NativeAgentRuntime {
     missionDigest,
     taskPacket,
     acceptedAnswers = [],
+    workspaceRoot = process.cwd(),
+    runId = "adhoc-run",
   }) {
     const envelope = buildRolePromptEnvelope({
       role: targetSession.role,
@@ -100,12 +125,26 @@ export class NativeAgentRuntime {
       taskPacket,
       acceptedAnswers,
     });
+    const template = this.buildTemplateForRole({
+      role: targetSession.role,
+      readRoots: taskPacket.readRoots ?? toParentDirectories(taskPacket.allowedFiles),
+      writeRoots: [],
+      communication: {
+        mode: "controller-relay",
+      },
+    });
+    this.materializeTemplates({
+      targetDir: `${workspaceRoot}/.codex/agents`,
+    });
 
     return this.adapter.answerQuestion({
       questionRecord,
       targetSession,
       envelope,
       taskPacket,
+      template,
+      workspaceRoot,
+      runId,
     });
   }
 }
