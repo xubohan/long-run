@@ -35,6 +35,27 @@ test("config overrides are derived from the agent template contract", () => {
   assert.match(overrides.join("\n"), /mcp_servers\.notion\.enabled_tools/);
 });
 
+test("config overrides disable inherited MCP servers that the template does not allow", () => {
+  const overrides = buildConfigOverridesFromTemplate({
+    developer_instructions: "Be strict.",
+    model_reasoning_effort: "xhigh",
+    sandbox_workspace_write: null,
+    skills: { config: [] },
+    mcp_servers: {
+      docs: {
+        enabled: true,
+        enabled_tools: ["fetch"],
+      },
+    },
+  }, {
+    inheritedMcpServerNames: ["notion", "docs"],
+  });
+
+  assert.match(overrides.join("\n"), /mcp_servers\.docs\.enabled=true/);
+  assert.match(overrides.join("\n"), /mcp_servers\.docs\.enabled_tools=/);
+  assert.match(overrides.join("\n"), /mcp_servers\.notion\.enabled=false/);
+});
+
 test("codex exec adapter parses structured task output and thread id", async () => {
   const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "longrun-codex-adapter-"));
   const seen = [];
@@ -196,6 +217,25 @@ test("codex exec adapter picks up timeout overrides from environment by default"
       process.env.LONGRUN_NATIVE_AGENT_TIMEOUT_MANAGER_MS = previous;
     }
   }
+});
+
+test("codex exec adapter detects inherited MCP servers from a Codex config file", async () => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "longrun-codex-adapter-"));
+  const configPath = path.join(workspaceRoot, "config.toml");
+  await writeFile(configPath, [
+    "[mcp_servers.notion]",
+    'url = "https://mcp.notion.com/mcp"',
+    "",
+    "[mcp_servers.github]",
+    'command = "github-mcp"',
+    "",
+  ].join("\n"));
+
+  const adapter = new CodexExecAdapter({
+    codexConfigPath: configPath,
+  });
+
+  assert.deepEqual(adapter.inheritedMcpServerNames.sort(), ["github", "notion"]);
 });
 
 test("child-agent output schema keeps optional role payloads nullable but required", async () => {

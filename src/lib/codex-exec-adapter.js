@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -49,7 +51,27 @@ export function renderTomlLiteral(value) {
   return quoteTomlString(value);
 }
 
-export function buildConfigOverridesFromTemplate(template) {
+function detectInheritedMcpServerNames(configPath) {
+  try {
+    const raw = readFileSync(configPath, "utf8");
+    return [...raw.matchAll(/^\[mcp_servers\.([^\]]+)\]/gm)].map((match) => match[1]).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function resolveCodexConfigPath(codexConfigPath = "") {
+  const explicit = String(codexConfigPath ?? "").trim();
+  if (explicit) {
+    return explicit;
+  }
+
+  return path.join(os.homedir(), ".codex", "config.toml");
+}
+
+export function buildConfigOverridesFromTemplate(template, {
+  inheritedMcpServerNames = [],
+} = {}) {
   const overrides = [
     `developer_instructions=${renderTomlLiteral(template.developer_instructions)}`,
     `model_reasoning_effort=${renderTomlLiteral(template.model_reasoning_effort)}`,
@@ -70,6 +92,12 @@ export function buildConfigOverridesFromTemplate(template) {
   for (const [serverName, serverConfig] of Object.entries(template.mcp_servers ?? {})) {
     for (const [key, value] of Object.entries(serverConfig)) {
       overrides.push(`mcp_servers.${serverName}.${key}=${renderTomlLiteral(value)}`);
+    }
+  }
+
+  for (const serverName of inheritedMcpServerNames) {
+    if (!Object.prototype.hasOwnProperty.call(template.mcp_servers ?? {}, serverName)) {
+      overrides.push(`mcp_servers.${serverName}.enabled=false`);
     }
   }
 
@@ -292,6 +320,8 @@ export class CodexExecAdapter {
     skipGitRepoCheck = true,
     timeoutMsByRole,
     killGraceMs,
+    codexConfigPath = "",
+    inheritedMcpServerNames,
   } = {}) {
     this.codexBin = codexBin;
     this.spawnImpl = spawnImpl;
@@ -299,6 +329,9 @@ export class CodexExecAdapter {
     this.skipGitRepoCheck = skipGitRepoCheck;
     this.timeoutMsByRole = buildTimeoutMsByRole(timeoutMsByRole);
     this.killGraceMs = resolveKillGraceMs(killGraceMs);
+    this.codexConfigPath = resolveCodexConfigPath(codexConfigPath);
+    this.inheritedMcpServerNames =
+      inheritedMcpServerNames ?? detectInheritedMcpServerNames(this.codexConfigPath);
   }
 
   async runTask({
@@ -355,7 +388,9 @@ export class CodexExecAdapter {
 
     for (const configItem of [
       ...this.defaultConfig,
-      ...buildConfigOverridesFromTemplate(template),
+      ...buildConfigOverridesFromTemplate(template, {
+        inheritedMcpServerNames: this.inheritedMcpServerNames,
+      }),
     ]) {
       optionArgs.push("--config", configItem);
     }
@@ -490,7 +525,9 @@ export class CodexExecAdapter {
 
     for (const configItem of [
       ...this.defaultConfig,
-      ...buildConfigOverridesFromTemplate(template),
+      ...buildConfigOverridesFromTemplate(template, {
+        inheritedMcpServerNames: this.inheritedMcpServerNames,
+      }),
     ]) {
       optionArgs.push("--config", configItem);
     }
