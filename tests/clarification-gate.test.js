@@ -16,7 +16,7 @@ class ClarificationRuntimeAdapter {
       threadId: `thread-${agentSession.agentId}`,
       status: "completed",
       summary: `Completed ${taskPacket.title}`,
-      evidence: [],
+      evidence: agentSession.role === "executor" ? [`self-test:${taskPacket.id}`] : [],
       filesTouched: [],
       questions: [],
     };
@@ -48,6 +48,18 @@ test("open clarifications block dispatch until answered end-to-end", async () =>
   });
 
   const clarification = await controller.requestClarification("Which deployment target should v2 prefer?");
+
+  const readOnlyResults = await controller.dispatchAssignments([
+    {
+      role: "observer",
+      taskPacket: {
+        id: "task-clarify-observer",
+        title: "Inspect deployment targets",
+        objective: "Collect read-only deployment facts while clarification is open.",
+      },
+    },
+  ]);
+  assert.equal(readOnlyResults.length, 1);
 
   await assert.rejects(
     () =>

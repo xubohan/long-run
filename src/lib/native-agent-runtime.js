@@ -3,7 +3,10 @@ import {
   materializeLongRunTemplateLayer,
 } from "./native-agent-template.js";
 import { buildRolePromptEnvelope } from "./agent-registry.js";
-import { normalizeChildAgentResult } from "./result-normalizer.js";
+import {
+  normalizeChildAgentResult,
+  validateNormalizedChildAgentResult,
+} from "./result-normalizer.js";
 import { CodexExecAdapter } from "./codex-exec-adapter.js";
 
 function dedupeStrings(values = []) {
@@ -100,13 +103,22 @@ export class NativeAgentRuntime {
       runId,
     });
 
-    return {
-      envelope,
-      result: normalizeChildAgentResult(rawResult, {
+    const normalizedResult = validateNormalizedChildAgentResult(
+      normalizeChildAgentResult(rawResult, {
         agentId: agentSession.agentId,
         taskId: taskPacket.id,
         role: agentSession.role,
       }),
+      {
+        agentId: agentSession.agentId,
+        taskId: taskPacket.id,
+        role: agentSession.role,
+      },
+    );
+
+    return {
+      envelope,
+      result: normalizedResult,
     };
   }
 

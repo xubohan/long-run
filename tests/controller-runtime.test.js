@@ -109,6 +109,21 @@ test("controller can accept a task-level verified integration", async () => {
     },
   ]);
 
+  await controller.ensureAgentSession({
+    role: "verifier",
+    taskId: "task-executor-1",
+  });
+  await controller.dispatchAssignments([
+    {
+      role: "verifier",
+      taskPacket: {
+        id: "task-executor-1",
+        title: "Verify feature gate",
+        objective: "Validate executor self-test evidence before review.",
+      },
+    },
+  ]);
+
   const acceptedTask = await controller.acceptTaskLevelVerifiedIntegration({
     taskId: "task-executor-1",
     verificationEvidence: "Verifier confirmed task-level integration.",
@@ -116,4 +131,140 @@ test("controller can accept a task-level verified integration", async () => {
 
   assert.equal(acceptedTask.status, "in_progress");
   assert.equal(acceptedTask.stage, "reviewing");
+});
+
+test("controller rejects verifier pass when executor self-test evidence is missing", async () => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "longrun-controller-"));
+  const runtime = new NativeAgentRuntime({
+    adapter: {
+      async runTask({ agentSession, taskPacket }) {
+        return {
+          agentId: agentSession.agentId,
+          taskId: taskPacket.id,
+          role: agentSession.role,
+          threadId: `thread-${agentSession.agentId}`,
+          status: "completed",
+          summary: `Completed ${taskPacket.title}`,
+          evidence: [],
+          filesTouched: [],
+          questions: [],
+        };
+      },
+    },
+  });
+  const controller = new LongRunController({
+    workspaceRoot,
+    runId: "run-controller-4",
+    missionDigest: "digest-4",
+    runtime,
+  });
+
+  await assert.rejects(
+    () =>
+      controller.dispatchAssignments([
+        {
+          role: "executor",
+          taskPacket: {
+            id: "task-executor-4",
+            title: "Implement without self-test proof",
+            allowedFiles: ["src/lib/controller.js"],
+          },
+        },
+      ]),
+    /self-test evidence/i,
+  );
+});
+
+test("controller rejects malformed child results instead of silently normalizing mismatches", async () => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "longrun-controller-"));
+  const runtime = new NativeAgentRuntime({
+    adapter: {
+      async runTask({ agentSession }) {
+        return {
+          agentId: agentSession.agentId,
+          taskId: "wrong-task-id",
+          role: agentSession.role,
+          threadId: `thread-${agentSession.agentId}`,
+          status: "completed",
+          summary: "Returned the wrong task id.",
+          evidence: [],
+          filesTouched: [],
+          questions: [],
+        };
+      },
+    },
+  });
+  const controller = new LongRunController({
+    workspaceRoot,
+    runId: "run-controller-3",
+    missionDigest: "digest-3",
+    runtime,
+  });
+
+  await assert.rejects(
+    () =>
+      controller.dispatchAssignments([
+        {
+          role: "observer",
+          taskPacket: {
+            id: "task-observer-3",
+            title: "Inspect repo mismatch",
+            objective: "Return a mismatched task id",
+          },
+        },
+      ]),
+    /taskId mismatch/i,
+  );
+});
+
+test("controller keeps verifier tasks open when runtime reports a non-completed status", async () => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "longrun-controller-"));
+  const runtime = new NativeAgentRuntime({
+    adapter: {
+      async runTask({ agentSession, taskPacket }) {
+        return {
+          agentId: agentSession.agentId,
+          taskId: taskPacket.id,
+          role: agentSession.role,
+          threadId: `thread-${agentSession.agentId}`,
+          status: agentSession.role === "verifier" ? "blocked" : "completed",
+          summary: `Completed ${taskPacket.title}`,
+          evidence: agentSession.role === "executor" ? [`self-test:${taskPacket.id}`] : [],
+          filesTouched: [],
+          questions: [],
+        };
+      },
+    },
+  });
+  const controller = new LongRunController({
+    workspaceRoot,
+    runId: "run-controller-5",
+    missionDigest: "digest-5",
+    runtime,
+  });
+
+  await controller.dispatchAssignments([
+    {
+      role: "executor",
+      taskPacket: {
+        id: "task-verifier-blocked",
+        title: "Implement something reviewable",
+        allowedFiles: ["src/lib/controller.js"],
+      },
+    },
+  ]);
+
+  await controller.dispatchAssignments([
+    {
+      role: "verifier",
+      taskPacket: {
+        id: "task-verifier-blocked",
+        title: "Verify something reviewable",
+      },
+    },
+  ]);
+
+  const state = await loadV2ControllerState(workspaceRoot, "run-controller-5");
+  assert.equal(state.tasks[0].stage, "verifying");
+  assert.equal(state.tasks[0].status, "blocked");
 });

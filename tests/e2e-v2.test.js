@@ -118,6 +118,17 @@ test("v2 e2e flow enforces clarification, relay, verifier/reviewer gates, resume
   assert.equal(firstWave[0].envelope.systemPrompt, firstWave[1].envelope.systemPrompt);
   assert.notEqual(firstWave[0].envelope.taskPrompt, firstWave[1].envelope.taskPrompt);
 
+  await controller.dispatchAssignments([
+    {
+      role: "verifier",
+      taskPacket: {
+        id: "task-executor",
+        title: "Verify controller relay",
+        objective: "Validate executor self-test evidence before review.",
+      },
+    },
+  ]);
+
   const relay = await controller.relayQuestion({
     fromAgentId: firstWave[2].agentSession.agentId,
     toRole: "observer",
@@ -166,11 +177,32 @@ test("v2 e2e flow enforces clarification, relay, verifier/reviewer gates, resume
   assert.equal(firstWave[2].agentSession.agentId, secondWave[0].agentSession.agentId);
   assert.equal(firstWave[2].agentSession.threadId, secondWave[0].agentSession.threadId);
 
+  await resumedController.dispatchAssignments([
+    {
+      role: "verifier",
+      taskPacket: {
+        id: "task-executor",
+        title: "Verify controller relay",
+        objective: "Validate the fixed executor output before review.",
+      },
+    },
+  ]);
+
   await resumedController.acceptTaskLevelVerifiedIntegration({
     taskId: "task-executor",
     verificationEvidence: "Verifier reran after fix and mapped evidence to DoD.",
   });
   await resumedController.resolveReviewFinding({ findingId: finding.id });
+  await resumedController.dispatchAssignments([
+    {
+      role: "reviewer",
+      taskPacket: {
+        id: "task-executor",
+        title: "Review controller relay",
+        objective: "Review the verified fix before manager acceptance.",
+      },
+    },
+  ]);
   await resumedController.recordReviewPass({
     taskId: "task-executor",
     summary: "Reviewer reran after fix and approved the task.",

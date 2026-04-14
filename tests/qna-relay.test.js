@@ -17,7 +17,7 @@ class RelayRuntimeAdapter {
       threadId: `thread-${agentSession.agentId}`,
       status: "completed",
       summary: `Completed ${taskPacket.title}`,
-      evidence: [],
+      evidence: agentSession.role === "executor" ? [`self-test:${taskPacket.id}`] : [],
       filesTouched: [],
       questions: [],
     };

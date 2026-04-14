@@ -36,6 +36,9 @@ test("v2 state reload restores persisted backlog objects and agent identity mapp
   const verification = createVerificationRecord({
     taskId: task.id,
     status: "unclear",
+    evidence: "Verifier is blocked on explicit self-test evidence.",
+    actorRole: "verifier",
+    actorAgentId: "verifier-1",
   });
   const review = createReviewFinding({
     taskId: task.id,

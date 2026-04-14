@@ -8,6 +8,19 @@ function normalizeStringList(values) {
     .filter(Boolean);
 }
 
+export const CHILD_AGENT_STATUSES = Object.freeze([
+  "completed",
+  "blocked",
+  "needs_input",
+  "retry_required",
+]);
+
+export const CHILD_AGENT_PRIORITIES = Object.freeze([
+  "low",
+  "medium",
+  "high",
+]);
+
 export function normalizeChildAgentResult(result, context = {}) {
   return {
     agentId: normalizeString(result?.agentId || context.agentId),
@@ -25,4 +38,50 @@ export function normalizeChildAgentResult(result, context = {}) {
     })),
     verification: result?.verification ?? null,
   };
+}
+
+function assertValue(value, label) {
+  if (!normalizeString(value)) {
+    throw new Error(`Child-agent result ${label} is required.`);
+  }
+}
+
+function assertEnum(value, validValues, label) {
+  if (!validValues.includes(value)) {
+    throw new Error(`Invalid child-agent result ${label}: ${value}`);
+  }
+}
+
+export function validateNormalizedChildAgentResult(result, context = {}) {
+  assertValue(result?.agentId, "agentId");
+  assertValue(result?.taskId, "taskId");
+  assertValue(result?.role, "role");
+  assertValue(result?.summary, "summary");
+  assertEnum(result?.status, CHILD_AGENT_STATUSES, "status");
+
+  if (normalizeString(context.agentId) && result.agentId !== normalizeString(context.agentId)) {
+    throw new Error(
+      `Child-agent result agentId mismatch: expected ${normalizeString(context.agentId)}, received ${result.agentId}`,
+    );
+  }
+
+  if (normalizeString(context.taskId) && result.taskId !== normalizeString(context.taskId)) {
+    throw new Error(
+      `Child-agent result taskId mismatch: expected ${normalizeString(context.taskId)}, received ${result.taskId}`,
+    );
+  }
+
+  if (normalizeString(context.role) && result.role !== normalizeString(context.role)) {
+    throw new Error(
+      `Child-agent result role mismatch: expected ${normalizeString(context.role)}, received ${result.role}`,
+    );
+  }
+
+  for (const question of result.questions ?? []) {
+    assertValue(question.question, "questions[].question");
+    assertValue(question.toRole, "questions[].toRole");
+    assertEnum(question.priority, CHILD_AGENT_PRIORITIES, "questions[].priority");
+  }
+
+  return result;
 }

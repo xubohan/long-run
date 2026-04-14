@@ -46,6 +46,17 @@ test("manager acceptance is blocked by review findings until resolved and review
     },
   ]);
 
+  await controller.dispatchAssignments([
+    {
+      role: "verifier",
+      taskPacket: {
+        id: "task-review-1",
+        title: "Verify reviewable change",
+        objective: "Validate executor self-test evidence before review.",
+      },
+    },
+  ]);
+
   await controller.acceptTaskLevelVerifiedIntegration({
     taskId: "task-review-1",
     verificationEvidence: "Verifier passed with evidence.",
@@ -69,6 +80,17 @@ test("manager acceptance is blocked by review findings until resolved and review
     /reviewer coverage/i,
   );
 
+  await controller.dispatchAssignments([
+    {
+      role: "reviewer",
+      taskPacket: {
+        id: "task-review-1",
+        title: "Review reviewable change",
+        objective: "Review the verified change before acceptance.",
+      },
+    },
+  ]);
+
   await controller.recordReviewPass({
     taskId: "task-review-1",
     summary: "Reviewer reran checks and approved the task.",
@@ -80,4 +102,52 @@ test("manager acceptance is blocked by review findings until resolved and review
 
   assert.equal(acceptedTask.stage, "delivered");
   assert.equal(acceptedTask.status, "accepted");
+});
+
+test("review pass requires a reviewer session for the same task", async () => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "longrun-review-"));
+  const controller = new LongRunController({
+    workspaceRoot,
+    runId: "run-review-2",
+    missionDigest: "digest-review",
+    runtime: new NativeAgentRuntime({
+      adapter: new ReviewRuntimeAdapter(),
+    }),
+  });
+
+  await controller.dispatchAssignments([
+    {
+      role: "executor",
+      taskPacket: {
+        id: "task-review-2",
+        title: "Implement reviewable change",
+        objective: "Ship a reviewable change safely.",
+        allowedFiles: ["src/lib/controller.js"],
+      },
+    },
+  ]);
+
+  await controller.dispatchAssignments([
+    {
+      role: "verifier",
+      taskPacket: {
+        id: "task-review-2",
+        title: "Verify reviewable change",
+        objective: "Validate executor self-test evidence before review.",
+      },
+    },
+  ]);
+  await controller.acceptTaskLevelVerifiedIntegration({
+    taskId: "task-review-2",
+    verificationEvidence: "Verifier evidence exists.",
+  });
+
+  await assert.rejects(
+    () =>
+      controller.recordReviewPass({
+        taskId: "task-review-2",
+        summary: "Reviewer green.",
+      }),
+    /reviewer agent session/i,
+  );
 });

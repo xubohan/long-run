@@ -43,6 +43,17 @@ function isWriteCapableRole(role) {
   return role === "executor";
 }
 
+function syncCollectionRecord(collection, record) {
+  const index = collection.findIndex((entry) => entry.id === record.id);
+  if (index >= 0) {
+    collection[index] = record;
+  } else {
+    collection.push(record);
+  }
+
+  return collection;
+}
+
 function assertSingleWriter(assignments) {
   const writers = assignments.filter((assignment) => isWriteCapableRole(assignment.role));
   if (writers.length > 1) {
@@ -79,6 +90,39 @@ function buildTaskRecord(taskPacket) {
   });
 }
 
+function hydrateTaskRecord(existingTask, taskPacket) {
+  if (!existingTask) {
+    return buildTaskRecord(taskPacket);
+  }
+
+  if (taskPacket.title != null) {
+    existingTask.title = taskPacket.title;
+  }
+
+  if (taskPacket.objective != null) {
+    existingTask.objective = taskPacket.objective;
+  }
+
+  if (taskPacket.dependencies != null) {
+    existingTask.dependencies = [...taskPacket.dependencies];
+  }
+
+  if (taskPacket.acceptanceChecks != null) {
+    existingTask.acceptanceChecks = [...taskPacket.acceptanceChecks];
+  }
+
+  if (taskPacket.allowedFiles != null) {
+    existingTask.allowedFiles = [...taskPacket.allowedFiles];
+  }
+
+  if (taskPacket.forbiddenFiles != null) {
+    existingTask.forbiddenFiles = [...taskPacket.forbiddenFiles];
+  }
+
+  existingTask.updatedAt = isoNow();
+  return existingTask;
+}
+
 function findReusableSession(agents, { role, taskId }) {
   return agents.find(
     (agent) => agent.role === role && agent.taskId === taskId,
@@ -102,6 +146,108 @@ function getTaskRecord(state, taskId) {
   }
 
   return taskRecord;
+}
+
+function findActorSession(state, {
+  taskId,
+  actorRole,
+  actorAgentId = "",
+}) {
+  const normalizedRole = String(actorRole ?? "").trim();
+  if (!normalizedRole) {
+    throw new Error("Actor role is required.");
+  }
+
+  const normalizedAgentId = String(actorAgentId ?? "").trim();
+  if (normalizedAgentId) {
+    const matchingSession = state.agents.find(
+      (agent) =>
+        agent.agentId === normalizedAgentId &&
+        agent.role === normalizedRole &&
+        agent.taskId === taskId,
+    );
+
+    if (!matchingSession) {
+      throw new Error(
+        `No ${normalizedRole} agent session found for task ${taskId} and actor ${normalizedAgentId}.`,
+      );
+    }
+
+    return matchingSession;
+  }
+
+  const candidateSessions = state.agents.filter(
+    (agent) => agent.role === normalizedRole && agent.taskId === taskId,
+  );
+
+  if (candidateSessions.length !== 1) {
+    throw new Error(
+      `Exactly one ${normalizedRole} agent session is required for task ${taskId}.`,
+    );
+  }
+
+  return candidateSessions[0];
+}
+
+function getTaskSelfTestEvidence(taskRecord) {
+  return normalizeList(taskRecord.selfTestEvidence);
+}
+
+function hasPriorTaskVerificationOrReview(state, taskId) {
+  return (
+    state.verifications.some((verification) => verification.taskId === taskId) ||
+    state.reviews.some((review) => review.taskId === taskId)
+  );
+}
+
+function normalizeAgentRunStatus(status) {
+  return String(status ?? "").trim();
+}
+
+function getAgentFreshnessTimestamp(agentSession) {
+  return String(agentSession.lastCompletedAt || agentSession.lastRunAt || "");
+}
+
+function assertCompletedActorSession(state, {
+  taskId,
+  actorRole,
+  actorAgentId = "",
+  freshAfter = "",
+}) {
+  const actorSession = findActorSession(state, {
+    taskId,
+    actorRole,
+    actorAgentId,
+  });
+
+  if (normalizeAgentRunStatus(actorSession.lastResultStatus) !== "completed") {
+    throw new Error(
+      `${actorRole} agent ${actorSession.agentId} has not completed a runtime pass for task ${taskId}.`,
+    );
+  }
+
+  if (
+    String(freshAfter).trim() &&
+    getAgentFreshnessTimestamp(actorSession).localeCompare(String(freshAfter).trim()) < 0
+  ) {
+    throw new Error(
+      `${actorRole} agent ${actorSession.agentId} has stale runtime evidence for task ${taskId}.`,
+    );
+  }
+
+  return actorSession;
+}
+
+function assertTaskReadyForVerification(taskRecord) {
+  if (!["self_testing", "verifying", "reverifying"].includes(taskRecord.stage)) {
+    throw new Error(
+      `Task ${taskRecord.id} is not ready for verifier review from stage ${taskRecord.stage}.`,
+    );
+  }
+
+  if (getTaskSelfTestEvidence(taskRecord).length === 0) {
+    throw new Error(`Task ${taskRecord.id} cannot be verified without self-test evidence.`);
+  }
 }
 
 function ensureTaskCanAdvanceToManagerAcceptance(state, taskId) {
@@ -151,6 +297,27 @@ export class LongRunController {
     return loadV2ControllerState(this.workspaceRoot, this.runId);
   }
 
+  async ensureAgentSession({
+    role,
+    taskId,
+    threadId = "",
+  }) {
+    const state = await this.ensureInitialized();
+    const reusableSession = findReusableSession(state.agents, { role, taskId });
+    if (reusableSession) {
+      return reusableSession;
+    }
+
+    const agentSession = createAgentSessionRecord({
+      role,
+      taskId,
+      threadId,
+    });
+    await writeV2Record(state.paths.agentsDir, agentSession);
+    syncCollectionRecord(state.agents, agentSession);
+    return agentSession;
+  }
+
   async loadRunBundle() {
     const [runBundle, controllerState] = await Promise.all([
       loadRunBundle(this.workspaceRoot, this.runId),
@@ -165,7 +332,10 @@ export class LongRunController {
 
   async dispatchAssignments(assignments) {
     const state = await this.ensureInitialized();
-    if (hasOpenClarifications(state.clarifications)) {
+    if (
+      hasOpenClarifications(state.clarifications) &&
+      assignments.some((assignment) => isWriteCapableRole(assignment.role))
+    ) {
       throw new Error("Cannot dispatch implementation while clarifications remain open.");
     }
 
@@ -173,28 +343,18 @@ export class LongRunController {
     const results = [];
 
     for (const assignment of assignments) {
-      const taskPacket = {
-        dependencies: [],
-        acceptanceChecks: [],
-        allowedFiles: [],
-        forbiddenFiles: [],
-        ...assignment.taskPacket,
-      };
+      const taskPacket = { ...assignment.taskPacket };
 
-      const reusableSession = findReusableSession(state.agents, {
-        role: assignment.role,
-        taskId: taskPacket.id,
-      });
-
-      const agentSession = reusableSession ?? createAgentSessionRecord({
+      const agentSession = await this.ensureAgentSession({
         role: assignment.role,
         taskId: taskPacket.id,
         threadId: assignment.threadId ?? "",
       });
-
-      const taskRecord = buildTaskRecord(taskPacket);
+      const existingTaskRecord = state.tasks.find((task) => task.id === taskPacket.id);
+      const taskRecord = hydrateTaskRecord(existingTaskRecord, taskPacket);
       updateTaskGraphWithTask(state.taskGraph, taskRecord);
       await writeV2Record(state.paths.tasksDir, taskRecord);
+      syncCollectionRecord(state.tasks, taskRecord);
 
       const runtimeResult = await this.runtime.runTask({
         agentSession,
@@ -211,16 +371,91 @@ export class LongRunController {
         runtimeResult.result.threadId ||
         agentSession.threadId ||
         `thread-${agentSession.agentId}`;
+      agentSession.lastResultStatus = runtimeResult.result.status;
+      agentSession.lastResultSummary = runtimeResult.result.summary;
+      agentSession.lastEvidence = [...runtimeResult.result.evidence];
+      agentSession.lastRunAt = isoNow();
+      agentSession.lastCompletedAt =
+        runtimeResult.result.status === "completed" ? agentSession.lastRunAt : "";
       await writeV2Record(state.paths.agentsDir, agentSession);
+      syncCollectionRecord(state.agents, agentSession);
 
       if (isWriteCapableRole(assignment.role)) {
-        setTaskStatus(taskRecord, "in_progress");
+        if (
+          runtimeResult.result.status === "completed" &&
+          runtimeResult.result.evidence.length === 0
+        ) {
+          throw new Error(
+            `Executor task ${taskPacket.id} must provide self-test evidence before verifier review.`,
+          );
+        }
+
+        taskRecord.selfTestEvidence =
+          runtimeResult.result.status === "completed"
+            ? [...runtimeResult.result.evidence]
+            : [];
+        taskRecord.selfTestActorAgentId =
+          runtimeResult.result.status === "completed" ? agentSession.agentId : "";
+        taskRecord.lastExecutionStatus = runtimeResult.result.status;
+        taskRecord.lastExecutionSummary = runtimeResult.result.summary;
+        taskRecord.lastExecutionCompletedAt =
+          runtimeResult.result.status === "completed" ? agentSession.lastCompletedAt : "";
+
+        if (runtimeResult.result.status === "completed") {
+          taskRecord.stage = hasPriorTaskVerificationOrReview(state, taskPacket.id)
+            ? "reverifying"
+            : "self_testing";
+          setTaskStatus(taskRecord, "in_progress");
+        } else if (runtimeResult.result.status === "needs_input") {
+          taskRecord.stage = taskRecord.stage === "fixing" ? "fixing" : "implementing";
+          setTaskStatus(taskRecord, "waiting_for_answer");
+        } else if (runtimeResult.result.status === "retry_required") {
+          taskRecord.stage = "fixing";
+          setTaskStatus(taskRecord, "retry_required");
+        } else {
+          taskRecord.stage = taskRecord.stage === "fixing" ? "fixing" : "implementing";
+          setTaskStatus(taskRecord, "blocked");
+        }
       } else {
-        setTaskStatus(taskRecord, "accepted");
-        taskRecord.stage = "delivered";
+        const supportingRole = assignment.role;
+        if (supportingRole === "verifier") {
+          taskRecord.stage = "verifying";
+          setTaskStatus(
+            taskRecord,
+            runtimeResult.result.status === "needs_input"
+              ? "waiting_for_answer"
+              : runtimeResult.result.status === "retry_required"
+                ? "retry_required"
+                : runtimeResult.result.status === "blocked"
+                  ? "blocked"
+                  : "in_progress",
+          );
+        } else if (supportingRole === "reviewer") {
+          taskRecord.stage = "reviewing";
+          setTaskStatus(
+            taskRecord,
+            runtimeResult.result.status === "needs_input"
+              ? "waiting_for_answer"
+              : runtimeResult.result.status === "retry_required"
+                ? "retry_required"
+                : runtimeResult.result.status === "blocked"
+                  ? "blocked"
+                  : "in_progress",
+          );
+        } else if (runtimeResult.result.status === "completed") {
+          setTaskStatus(taskRecord, "accepted");
+          taskRecord.stage = "delivered";
+        } else if (runtimeResult.result.status === "needs_input") {
+          setTaskStatus(taskRecord, "waiting_for_answer");
+        } else if (runtimeResult.result.status === "retry_required") {
+          setTaskStatus(taskRecord, "retry_required");
+        } else {
+          setTaskStatus(taskRecord, "blocked");
+        }
       }
       await writeV2Record(state.paths.tasksDir, taskRecord);
       updateTaskGraphWithTask(state.taskGraph, taskRecord);
+      syncCollectionRecord(state.tasks, taskRecord);
 
       results.push({
         agentSession,
@@ -337,15 +572,25 @@ export class LongRunController {
     };
   }
 
-  async recordVerification({ taskId, status, evidence }) {
+  async recordVerification({ taskId, status, evidence, actorAgentId = "" }) {
     const state = await this.ensureInitialized();
     const taskRecord = getTaskRecord(state, taskId);
+    assertTaskReadyForVerification(taskRecord);
+    const verifierSession = assertCompletedActorSession(state, {
+      taskId,
+      actorRole: "verifier",
+      actorAgentId,
+      freshAfter: taskRecord.lastExecutionCompletedAt,
+    });
     const verification = createVerificationRecord({
       taskId,
       status,
       evidence,
+      actorRole: "verifier",
+      actorAgentId: verifierSession.agentId,
     });
     await writeV2Record(state.paths.verificationsDir, verification);
+    syncCollectionRecord(state.verifications, verification);
 
     if (status === "pass") {
       taskRecord.stage = "reviewing";
@@ -373,6 +618,7 @@ export class LongRunController {
       severity,
     });
     await writeV2Record(state.paths.reviewsDir, finding);
+    syncCollectionRecord(state.reviews, finding);
 
     if (severity !== "low") {
       taskRecord.stage = "fixing";
@@ -387,14 +633,24 @@ export class LongRunController {
     return finding;
   }
 
-  async recordReviewPass({ taskId, summary = "Review passed." }) {
+  async recordReviewPass({ taskId, summary = "Review passed.", actorAgentId = "" }) {
     const state = await this.ensureInitialized();
     const taskRecord = getTaskRecord(state, taskId);
+    const latestVerification = getLatestVerificationForTask(state.verifications, taskId);
+    const reviewerSession = assertCompletedActorSession(state, {
+      taskId,
+      actorRole: "reviewer",
+      actorAgentId,
+      freshAfter: latestVerification?.updatedAt || latestVerification?.createdAt || "",
+    });
     const reviewPass = createReviewPass({
       taskId,
       summary,
+      actorRole: "reviewer",
+      actorAgentId: reviewerSession.agentId,
     });
     await writeV2Record(state.paths.reviewsDir, reviewPass);
+    syncCollectionRecord(state.reviews, reviewPass);
 
     if (hasPassingTaskVerification(state.verifications, taskId)) {
       taskRecord.stage = "awaiting_manager_acceptance";
@@ -418,6 +674,7 @@ export class LongRunController {
 
     resolveReviewFinding(finding);
     await writeV2Record(state.paths.reviewsDir, finding);
+    syncCollectionRecord(state.reviews, finding);
 
     const taskRecord = state.tasks.find((task) => task.id === finding.taskId);
     if (
@@ -442,11 +699,16 @@ export class LongRunController {
     return finding;
   }
 
-  async acceptTaskLevelVerifiedIntegration({ taskId, verificationEvidence }) {
+  async acceptTaskLevelVerifiedIntegration({
+    taskId,
+    verificationEvidence,
+    actorAgentId = "",
+  }) {
     await this.recordVerification({
       taskId,
       status: "pass",
       evidence: verificationEvidence,
+      actorAgentId,
     });
 
     const state = await this.ensureInitialized();

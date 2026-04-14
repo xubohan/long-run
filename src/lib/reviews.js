@@ -9,6 +9,8 @@ export function createReviewFinding({
   severity = "medium",
   status = "open",
   kind = "finding",
+  actorRole = "",
+  actorAgentId = "",
 }) {
   if (!String(taskId ?? "").trim()) {
     throw new Error("Review finding taskId is required.");
@@ -27,6 +29,8 @@ export function createReviewFinding({
     severity,
     status,
     kind,
+    actorRole: String(actorRole ?? "").trim(),
+    actorAgentId: String(actorAgentId ?? "").trim(),
     createdAt: now,
     updatedAt: now,
   };
@@ -36,6 +40,8 @@ export function createReviewPass({
   id = randomUUID(),
   taskId,
   summary = "Review passed.",
+  actorRole = "reviewer",
+  actorAgentId,
 }) {
   return createReviewFinding({
     id,
@@ -44,6 +50,8 @@ export function createReviewPass({
     severity: "low",
     status: "resolved",
     kind: "pass",
+    actorRole,
+    actorAgentId,
   });
 }
 
@@ -81,6 +89,8 @@ export function hasTaskReviewPass(findings = [], taskId) {
     (finding) =>
       finding.taskId === taskId &&
       finding.kind === "pass" &&
-      finding.status === "resolved",
+      finding.status === "resolved" &&
+      finding.actorRole === "reviewer" &&
+      Boolean(String(finding.actorAgentId ?? "").trim()),
   );
 }

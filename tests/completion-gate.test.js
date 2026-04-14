@@ -58,10 +58,31 @@ test("pure completion gate completes the run only after verifier, reviewer, and 
     },
   ]);
 
+  await controller.dispatchAssignments([
+    {
+      role: "verifier",
+      taskPacket: {
+        id: "task-complete-1",
+        title: "Verify the pure gate",
+        objective: "Validate executor self-test evidence before review.",
+      },
+    },
+  ]);
+
   await controller.acceptTaskLevelVerifiedIntegration({
     taskId: "task-complete-1",
     verificationEvidence: "Verifier evidence mapped to DoD.",
   });
+  await controller.dispatchAssignments([
+    {
+      role: "reviewer",
+      taskPacket: {
+        id: "task-complete-1",
+        title: "Review the pure gate",
+        objective: "Review the verified change before manager acceptance.",
+      },
+    },
+  ]);
   await controller.recordReviewPass({
     taskId: "task-complete-1",
     summary: "Review green.",

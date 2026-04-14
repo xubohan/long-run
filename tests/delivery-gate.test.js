@@ -25,6 +25,9 @@ test("delivery gate blocks completion when any hard gate remains open", () => {
       createVerificationRecord({
         taskId: task.id,
         status: "unclear",
+        evidence: "Verifier still needs explicit self-test proof.",
+        actorRole: "verifier",
+        actorAgentId: "verifier-1",
       }),
     ],
     reviews: [
@@ -57,6 +60,8 @@ test("delivery gate completes only when all hard gates are closed", () => {
         taskId: task.id,
         status: "pass",
         evidence: "Verifier confirmed all checks.",
+        actorRole: "verifier",
+        actorAgentId: "verifier-2",
       }),
     ],
     reviews: [],

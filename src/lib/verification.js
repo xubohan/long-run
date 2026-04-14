@@ -2,6 +2,13 @@ import { randomUUID } from "node:crypto";
 
 import { isoNow } from "./io.js";
 
+export const VERIFICATION_STATUSES = Object.freeze([
+  "pass",
+  "fail",
+  "unclear",
+  "not_run",
+]);
+
 function trimText(value) {
   return String(value ?? "").trim();
 }
@@ -49,9 +56,19 @@ export function createVerificationRecord({
   taskId,
   status = "unclear",
   evidence = "",
+  actorRole = "",
+  actorAgentId = "",
 }) {
   if (!trimText(taskId)) {
     throw new Error("Verification taskId is required.");
+  }
+
+  if (!VERIFICATION_STATUSES.includes(status)) {
+    throw new Error(`Invalid verification status: ${status}`);
+  }
+
+  if (!trimText(evidence)) {
+    throw new Error("Verification evidence is required.");
   }
 
   const now = isoNow();
@@ -61,6 +78,8 @@ export function createVerificationRecord({
     taskId: trimText(taskId),
     status,
     evidence: trimText(evidence),
+    actorRole: trimText(actorRole),
+    actorAgentId: trimText(actorAgentId),
     createdAt: now,
     updatedAt: now,
   };
@@ -78,7 +97,12 @@ export function getLatestVerificationForTask(verifications = [], taskId) {
 
 export function hasPassingTaskVerification(verifications = [], taskId) {
   const latest = getLatestVerificationForTask(verifications, taskId);
-  return Boolean(latest?.status === "pass" && trimText(latest?.evidence));
+  return Boolean(
+    latest?.status === "pass" &&
+      trimText(latest?.evidence) &&
+      latest?.actorRole === "verifier" &&
+      trimText(latest?.actorAgentId),
+  );
 }
 
 export function hasBlockingVerificationFindings(verifications = []) {
