@@ -47,11 +47,8 @@
 
 可选但推荐：
 
-- 先跑一遍测试
-
-```bash
-npm test
-```
+- 先确认 `codex` CLI 已安装并可用
+- 如果你本地保留了私有验证套件，再运行对应测试命令
 
 ---
 
@@ -317,18 +314,12 @@ v2 child-agent 的真实运行 artifact 会落到：
 
 ## 开发与验证
 
-跑测试：
+公开仓库当前**不附带 `tests/` 目录**。
+如果你在本地保留了私有验证套件，可以继续使用你自己的测试流程；否则至少建议做：
 
-```bash
-npm test
-```
-
-如果你在改 v2 runtime，建议至少顺手看：
-
-- `tests/manager-loop.test.js`
-- `tests/controller-runtime.test.js`
-- `tests/codex-exec-adapter.test.js`
-- `tests/cli-v2-routing.test.js`
+- `node ./src/cli.js --help`
+- 针对目标命令做最小 smoke run
+- 检查 `.longrun/runs/<run_id>/artifacts/` 中的真实运行证据
 
 ---
 
