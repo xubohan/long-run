@@ -16,9 +16,9 @@ import {
 
 function usage() {
   return `Usage:
-  longrun start --goal "..." --done "..." [--engine v1|v2]
+  longrun start --goal "..." --done "..." [--engine v1|v2] [--auto-bootstrap]
   longrun status [run_id]
-  longrun resume [run_id]
+  longrun resume [run_id] [--auto-bootstrap]
   longrun approve [run_id] [--note "..."] [--no-resume]
   longrun answer [run_id] --clarification-id "..." --answer "..."
   longrun stop [run_id] [--reason "..."]
@@ -32,6 +32,7 @@ Common options for start:
   --guardrail       Repeatable guardrail
   --clarification   Repeatable clarification
   --engine          Run engine (default: v1)
+  --auto-bootstrap  Enable manager auto-clarify/planning/bootstrap for v2 runs
   --model           Codex model override
   --profile         Codex profile
   --sandbox         Sandbox mode (default: workspace-write)
@@ -53,6 +54,7 @@ function parseCommandArgs(argv) {
       guardrail: { type: "string", multiple: true },
       clarification: { type: "string", multiple: true },
       engine: { type: "string" },
+      "auto-bootstrap": { type: "boolean" },
       model: { type: "string" },
       profile: { type: "string" },
       sandbox: { type: "string" },
@@ -204,6 +206,7 @@ async function run() {
             ? true
             : Boolean(values["skip-git-repo-check"]),
       },
+      autoBootstrap: Boolean(values["auto-bootstrap"]),
     });
     printStatus(result);
     return;
@@ -215,7 +218,13 @@ async function run() {
   }
 
   if (command === "resume") {
-    printStatus(await resumeManagedRun({ workspaceRoot, runId }));
+    printStatus(
+      await resumeManagedRun({
+        workspaceRoot,
+        runId,
+        autoBootstrap: Boolean(values["auto-bootstrap"]),
+      }),
+    );
     return;
   }
 

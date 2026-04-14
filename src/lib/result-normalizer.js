@@ -21,6 +21,15 @@ export const CHILD_AGENT_PRIORITIES = Object.freeze([
   "high",
 ]);
 
+export const CHILD_AGENT_ROLES = Object.freeze([
+  "manager",
+  "planner",
+  "observer",
+  "executor",
+  "verifier",
+  "reviewer",
+]);
+
 export const VERIFIER_VERDICTS = Object.freeze([
   "pass",
   "fail",
@@ -38,6 +47,27 @@ export const REVIEW_SEVERITIES = Object.freeze([
   "high",
 ]);
 
+function normalizeTaskProposal(proposal) {
+  return {
+    id: normalizeString(proposal?.id),
+    title: normalizeString(proposal?.title),
+    objective: normalizeString(proposal?.objective),
+    role: normalizeString(proposal?.role),
+    dependencies: normalizeStringList(proposal?.dependencies),
+    acceptanceChecks: normalizeStringList(proposal?.acceptanceChecks),
+    allowedFiles: normalizeStringList(proposal?.allowedFiles),
+    forbiddenFiles: normalizeStringList(proposal?.forbiddenFiles),
+  };
+}
+
+function normalizeStaffingEntry(entry) {
+  return {
+    role: normalizeString(entry?.role),
+    count: Number(entry?.count ?? 0),
+    rationale: normalizeString(entry?.rationale),
+  };
+}
+
 export function normalizeChildAgentResult(result, context = {}) {
   return {
     agentId: normalizeString(result?.agentId || context.agentId),
@@ -53,6 +83,8 @@ export function normalizeChildAgentResult(result, context = {}) {
       priority: normalizeString(question?.priority || "medium"),
       toRole: normalizeString(question?.toRole),
     })),
+    taskProposals: (result?.taskProposals ?? []).map(normalizeTaskProposal),
+    staffing: (result?.staffing ?? []).map(normalizeStaffingEntry),
     verification: result?.verification ?? null,
     review: result?.review ?? null,
   };
@@ -99,6 +131,22 @@ export function validateNormalizedChildAgentResult(result, context = {}) {
     assertValue(question.question, "questions[].question");
     assertValue(question.toRole, "questions[].toRole");
     assertEnum(question.priority, CHILD_AGENT_PRIORITIES, "questions[].priority");
+    assertEnum(question.toRole, CHILD_AGENT_ROLES, "questions[].toRole");
+  }
+
+  for (const proposal of result.taskProposals ?? []) {
+    assertValue(proposal.id, "taskProposals[].id");
+    assertValue(proposal.title, "taskProposals[].title");
+    assertValue(proposal.objective, "taskProposals[].objective");
+    assertEnum(proposal.role, CHILD_AGENT_ROLES, "taskProposals[].role");
+  }
+
+  for (const staffingEntry of result.staffing ?? []) {
+    assertEnum(staffingEntry.role, CHILD_AGENT_ROLES, "staffing[].role");
+    if (!Number.isInteger(staffingEntry.count) || staffingEntry.count < 1) {
+      throw new Error(`Invalid child-agent result staffing[].count: ${staffingEntry.count}`);
+    }
+    assertValue(staffingEntry.rationale, "staffing[].rationale");
   }
 
   if (result?.verification) {

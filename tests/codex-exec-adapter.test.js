@@ -59,6 +59,8 @@ test("codex exec adapter parses structured task output and thread id", async () 
               evidence: ["package.json:name=long-run"],
               filesTouched: [],
               questions: [],
+              taskProposals: [],
+              staffing: [],
               verification: null,
               review: null,
             }),
@@ -119,15 +121,17 @@ test("child-agent output schema keeps optional role payloads nullable but requir
   const schemaPath = path.join(process.cwd(), "src/lib/child-agent-output-schema.json");
   const schema = JSON.parse(await readFile(schemaPath, "utf8"));
 
-  assert.deepEqual(schema.required, [
+  assert.deepEqual([...schema.required].sort(), [
     "status",
     "summary",
     "evidence",
     "filesTouched",
     "questions",
-    "verification",
     "review",
-  ]);
+    "taskProposals",
+    "staffing",
+    "verification",
+  ].sort());
   assert.deepEqual(schema.properties.verification.type, ["object", "null"]);
   assert.deepEqual(schema.properties.review.type, ["object", "null"]);
 });

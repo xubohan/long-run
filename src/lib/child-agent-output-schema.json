@@ -9,7 +9,9 @@
     "filesTouched",
     "questions",
     "verification",
-    "review"
+    "review",
+    "taskProposals",
+    "staffing"
   ],
   "properties": {
     "status": {
@@ -43,6 +45,79 @@
           "toRole": {
             "type": "string",
             "enum": ["manager", "planner", "observer", "executor", "verifier", "reviewer"]
+          }
+        }
+      }
+    },
+    "taskProposals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "title",
+          "objective",
+          "role",
+          "dependencies",
+          "acceptanceChecks",
+          "allowedFiles",
+          "forbiddenFiles"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "objective": {
+            "type": "string",
+            "minLength": 1
+          },
+          "role": {
+            "type": "string",
+            "enum": ["manager", "planner", "observer", "executor", "verifier", "reviewer"]
+          },
+          "dependencies": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "acceptanceChecks": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "allowedFiles": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "forbiddenFiles": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        }
+      }
+    },
+    "staffing": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["role", "count", "rationale"],
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": ["manager", "planner", "observer", "executor", "verifier", "reviewer"]
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "rationale": {
+            "type": "string",
+            "minLength": 1
           }
         }
       }

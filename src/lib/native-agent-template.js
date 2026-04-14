@@ -300,7 +300,7 @@ export function buildLongRunAgentTemplate({
       writeRoots: normalizedWriteRoots,
     }),
     buildCommunicationSection(communication),
-    "Structured output rules: Always return status, summary, evidence, filesTouched, questions, verification, and review. Use null for verification or review when your role does not own them or when the task did not complete.",
+    "Structured output rules: Always return status, summary, evidence, filesTouched, questions, taskProposals, staffing, verification, and review. Use [] for questions, taskProposals, or staffing when unused. Use null for verification or review when your role does not own them or when the task did not complete.",
     buildRoleInstructions(roleDefinition, extraInstructions),
   ].join("\n\n");
 

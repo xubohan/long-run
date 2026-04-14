@@ -50,7 +50,8 @@ test("executor template keeps write scope in sandbox roots and relay protocol in
   assert.match(template.developer_instructions, /controller-relay/);
   assert.match(template.developer_instructions, /read focus roots: src, tests/);
   assert.match(template.developer_instructions, /Structured output rules:/);
-  assert.match(template.developer_instructions, /Use null for verification or review/);
+  assert.match(template.developer_instructions, /taskProposals, staffing, verification, and review/);
+  assert.match(template.developer_instructions, /Use \[\] for questions, taskProposals, or staffing/);
   assert.deepEqual(template.mcp_servers.notion.enabled_tools, ["fetch", "search"]);
 });
 

@@ -24,5 +24,5 @@ test("role prompt envelopes carry authority precedence, task scope, and accepted
   assert.match(envelope.taskPrompt, /Forbidden files:/);
   assert.match(envelope.taskPrompt, /Accepted answers:/);
   assert.match(envelope.systemPrompt, /Structured output rules:/);
-  assert.match(envelope.systemPrompt, /verification, and review/);
+  assert.match(envelope.systemPrompt, /taskProposals, staffing, verification, and review/);
 });

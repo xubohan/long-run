@@ -42,12 +42,14 @@ export async function startManagedRun({
   maxCycles = 0,
   engine = "v1",
   worker,
+  autoBootstrap = false,
 }) {
   if (resolveEngine(engine) === "v2") {
     return startV2Run({
       workspaceRoot,
       missionInput,
       workerConfig,
+      autoBootstrap,
     });
   }
 
@@ -73,12 +75,14 @@ export async function resumeManagedRun({
   workspaceRoot,
   runId = "",
   worker,
+  autoBootstrap = false,
 }) {
   const { bundle } = await resolveBundle(workspaceRoot, runId);
   if (bundle.run.engine === "v2") {
     return resumeV2Run({
       workspaceRoot,
       runId: bundle.run.runId,
+      autoBootstrap,
     });
   }
 

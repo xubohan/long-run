@@ -19,7 +19,7 @@ export function buildRolePromptEnvelope({
     `You are the long-run v2 ${roleName} agent.`,
     buildAuthorityPromptSection(),
     roleSystemInstructions.trim(),
-    "Structured output rules: Always return the top-level JSON keys status, summary, evidence, filesTouched, questions, verification, and review. Use null for verification or review when your role does not own them or when the run did not complete.",
+    "Structured output rules: Always return the top-level JSON keys status, summary, evidence, filesTouched, questions, taskProposals, staffing, verification, and review. Use [] for questions, taskProposals, or staffing when unused. Use null for verification or review when your role does not own them or when the run did not complete.",
   ].join("\n\n");
 
   const taskPrompt = [

@@ -82,6 +82,7 @@ function buildTaskRecord(taskPacket) {
     id: taskPacket.id,
     title: taskPacket.title,
     objective: taskPacket.objective,
+    ownerRole: taskPacket.ownerRole || "executor",
     stage: "implementing",
     status: "dispatched",
     dependencies: taskPacket.dependencies ?? [],
@@ -106,6 +107,10 @@ function hydrateTaskRecord(existingTask, taskPacket) {
 
   if (taskPacket.dependencies != null) {
     existingTask.dependencies = [...taskPacket.dependencies];
+  }
+
+  if (taskPacket.ownerRole != null) {
+    existingTask.ownerRole = String(taskPacket.ownerRole).trim();
   }
 
   if (taskPacket.acceptanceChecks != null) {
@@ -370,6 +375,41 @@ function deriveControllerPhase(taskRecord, resultStatus) {
   }
 }
 
+function getAnsweredClarificationSummaries(clarifications = []) {
+  return clarifications
+    .filter((clarification) => String(clarification.answer ?? "").trim())
+    .map(
+      (clarification) =>
+        `Clarification: ${clarification.prompt}\nAnswer: ${String(clarification.answer).trim()}`,
+    );
+}
+
+function createBootstrapTaskPacket({
+  id,
+  title,
+  objective,
+  role,
+  missionGoal,
+  definitionOfDone = [],
+}) {
+  return {
+    id,
+    title,
+    objective: [
+      objective,
+      `Mission goal: ${missionGoal}`,
+      definitionOfDone.length > 0
+        ? `Definition of done: ${definitionOfDone.join(" | ")}`
+        : "Definition of done: none",
+    ].join("\n"),
+    ownerRole: role,
+    dependencies: [],
+    acceptanceChecks: definitionOfDone,
+    allowedFiles: [],
+    forbiddenFiles: [],
+  };
+}
+
 export class LongRunController {
   constructor({
     workspaceRoot,
@@ -434,6 +474,268 @@ export class LongRunController {
       ...runBundle,
       controllerState,
     };
+  }
+
+  async runManagerClarificationPass() {
+    const state = await this.ensureInitialized();
+    if (state.tasks.length > 0 || state.clarifications.length > 0) {
+      return [];
+    }
+
+    const runBundle = await loadRunBundle(this.workspaceRoot, this.runId);
+    const taskPacket = createBootstrapTaskPacket({
+      id: "manager-bootstrap",
+      title: "Manager clarification bootstrap",
+      objective: "Ask only the key clarification questions needed before planning and dispatch.",
+      role: "manager",
+      missionGoal: runBundle.mission.goal,
+      definitionOfDone: runBundle.mission.definitionOfDone,
+    });
+    const agentSession = await this.ensureAgentSession({
+      role: "manager",
+      taskId: taskPacket.id,
+    });
+
+    const runtimeResult = await this.runtime.runTask({
+      agentSession,
+      missionDigest: this.missionDigest,
+      taskPacket,
+      acceptedAnswers: getAnsweredClarificationSummaries(state.clarifications),
+      workspaceRoot: this.workspaceRoot,
+      runId: this.runId,
+    });
+
+    agentSession.threadId =
+      runtimeResult.result.threadId ||
+      agentSession.threadId ||
+      `thread-${agentSession.agentId}`;
+    agentSession.lastResultStatus = runtimeResult.result.status;
+    agentSession.lastResultSummary = runtimeResult.result.summary;
+    agentSession.lastEvidence = [...runtimeResult.result.evidence];
+    agentSession.lastRunAt = isoNow();
+    agentSession.lastCompletedAt =
+      runtimeResult.result.status === "completed" ? agentSession.lastRunAt : "";
+    await writeV2Record(state.paths.agentsDir, agentSession);
+    syncCollectionRecord(state.agents, agentSession);
+
+    state.controller.staffingPlan = runtimeResult.result.staffing ?? [];
+    state.controller.managerSummary = runtimeResult.result.summary;
+    state.controller.managerClarifiedAt = agentSession.lastRunAt;
+
+    const clarificationRecords = [];
+    for (const question of runtimeResult.result.questions ?? []) {
+      if (question.toRole !== "manager") {
+        continue;
+      }
+      const clarification = createClarification({ prompt: question.question });
+      await writeV2Record(state.paths.clarificationsDir, clarification);
+      syncCollectionRecord(state.clarifications, clarification);
+      clarificationRecords.push(clarification);
+    }
+
+    if (clarificationRecords.length > 0) {
+      runBundle.run.status = "paused";
+      runBundle.run.pendingApproval = {
+        required: true,
+        reason: `Clarification required: ${clarificationRecords.map((item) => item.prompt).join(" ")}`,
+        requestedAt: isoNow(),
+        approvedAt: null,
+        note: "",
+      };
+      state.controller.currentPhase = "understanding";
+      await saveRun(runBundle.paths, runBundle.run);
+    } else {
+      state.controller.currentPhase = "planning";
+    }
+
+    await saveV2Controller(state.paths, state.controller);
+    return clarificationRecords;
+  }
+
+  async runPlannerTaskGraphPass() {
+    const state = await this.ensureInitialized();
+    if (state.tasks.length > 0 || hasOpenClarifications(state.clarifications)) {
+      return [];
+    }
+
+    const runBundle = await loadRunBundle(this.workspaceRoot, this.runId);
+    const taskPacket = createBootstrapTaskPacket({
+      id: "planner-bootstrap",
+      title: "Planner task graph bootstrap",
+      objective: "Generate the initial task graph and role mix after clarifications are answered.",
+      role: "planner",
+      missionGoal: runBundle.mission.goal,
+      definitionOfDone: runBundle.mission.definitionOfDone,
+    });
+    const agentSession = await this.ensureAgentSession({
+      role: "planner",
+      taskId: taskPacket.id,
+    });
+
+    const runtimeResult = await this.runtime.runTask({
+      agentSession,
+      missionDigest: this.missionDigest,
+      taskPacket,
+      acceptedAnswers: getAnsweredClarificationSummaries(state.clarifications),
+      workspaceRoot: this.workspaceRoot,
+      runId: this.runId,
+    });
+
+    agentSession.threadId =
+      runtimeResult.result.threadId ||
+      agentSession.threadId ||
+      `thread-${agentSession.agentId}`;
+    agentSession.lastResultStatus = runtimeResult.result.status;
+    agentSession.lastResultSummary = runtimeResult.result.summary;
+    agentSession.lastEvidence = [...runtimeResult.result.evidence];
+    agentSession.lastRunAt = isoNow();
+    agentSession.lastCompletedAt =
+      runtimeResult.result.status === "completed" ? agentSession.lastRunAt : "";
+    await writeV2Record(state.paths.agentsDir, agentSession);
+    syncCollectionRecord(state.agents, agentSession);
+
+    if (runtimeResult.result.status !== "completed") {
+      state.controller.currentPhase = "planning";
+      await saveV2Controller(state.paths, state.controller);
+      return [];
+    }
+
+    state.controller.staffingPlan = runtimeResult.result.staffing ?? state.controller.staffingPlan ?? [];
+    state.controller.planningSummary = runtimeResult.result.summary;
+    state.controller.plannedTaskIds = [];
+
+    for (const proposal of runtimeResult.result.taskProposals ?? []) {
+      const taskRecord = createV2Task({
+        id: proposal.id,
+        title: proposal.title,
+        objective: proposal.objective,
+        ownerRole: proposal.role,
+        stage: proposal.role === "executor" ? "implementing" : "understanding",
+        status: "queued",
+        dependencies: proposal.dependencies ?? [],
+        acceptanceChecks: proposal.acceptanceChecks ?? [],
+        allowedFiles: proposal.allowedFiles ?? [],
+        forbiddenFiles: proposal.forbiddenFiles ?? [],
+      });
+      await writeV2Record(state.paths.tasksDir, taskRecord);
+      syncCollectionRecord(state.tasks, taskRecord);
+      updateTaskGraphWithTask(state.taskGraph, taskRecord);
+      state.controller.plannedTaskIds.push(taskRecord.id);
+    }
+
+    await saveV2TaskGraph(state.paths, state.taskGraph);
+    state.controller.currentPhase = "planning";
+    await saveV2Controller(state.paths, state.controller);
+    return state.controller.plannedTaskIds;
+  }
+
+  async dispatchQueuedTasks() {
+    const state = await this.ensureInitialized();
+    if (hasOpenClarifications(state.clarifications) || hasOpenHighPriorityQuestions(state.questions)) {
+      return [];
+    }
+
+    const hasActiveWriter = state.tasks.some(
+      (task) =>
+        task.ownerRole === "executor" &&
+        ["dispatched", "in_progress", "waiting_for_answer", "retry_required", "blocked"].includes(task.status) &&
+        task.stage !== "delivered",
+    );
+
+    const assignments = [];
+
+    for (const task of state.tasks) {
+      if (task.status !== "queued") {
+        continue;
+      }
+
+      if (task.ownerRole === "executor") {
+        if (hasActiveWriter || assignments.some((assignment) => assignment.role === "executor")) {
+          continue;
+        }
+      }
+
+      assignments.push({
+        role: task.ownerRole || "executor",
+        taskPacket: {
+          id: task.id,
+          title: task.title,
+          objective: task.objective,
+          ownerRole: task.ownerRole || "executor",
+          dependencies: task.dependencies ?? [],
+          acceptanceChecks: task.acceptanceChecks ?? [],
+          allowedFiles: task.allowedFiles ?? [],
+          forbiddenFiles: task.forbiddenFiles ?? [],
+        },
+        acceptedAnswers: getAnsweredClarificationSummaries(state.clarifications),
+      });
+    }
+
+    if (assignments.length === 0) {
+      return [];
+    }
+
+    return this.dispatchAssignments(assignments);
+  }
+
+  async autoAcceptReadyTasks() {
+    const state = await this.ensureInitialized();
+    if (hasOpenClarifications(state.clarifications) || hasOpenHighPriorityQuestions(state.questions)) {
+      return [];
+    }
+
+    const readyTaskIds = state.tasks
+      .filter((task) => task.stage === "awaiting_manager_acceptance" && task.status !== "accepted")
+      .map((task) => task.id);
+
+    const acceptedTasks = [];
+    for (const taskId of readyTaskIds) {
+      acceptedTasks.push(await this.managerAcceptTask({ taskId }));
+    }
+
+    return acceptedTasks;
+  }
+
+  async advanceManagerLoop() {
+    const maxPasses = 12;
+    for (let pass = 0; pass < maxPasses; pass += 1) {
+      let progressed = false;
+      const state = await this.ensureInitialized();
+
+      if (state.tasks.length === 0 && state.clarifications.length === 0) {
+        const clarifications = await this.runManagerClarificationPass();
+        progressed = progressed || clarifications.length > 0;
+      }
+
+      const refreshed = await this.ensureInitialized();
+      if (refreshed.tasks.length === 0 && !hasOpenClarifications(refreshed.clarifications)) {
+        const plannedTaskIds = await this.runPlannerTaskGraphPass();
+        progressed = progressed || plannedTaskIds.length > 0;
+      }
+
+      const queuedResults = await this.dispatchQueuedTasks();
+      progressed = progressed || queuedResults.length > 0;
+
+      const readyResults = await this.continueReadyTasks();
+      progressed = progressed || readyResults.length > 0;
+
+      const acceptedTasks = await this.autoAcceptReadyTasks();
+      progressed = progressed || acceptedTasks.length > 0;
+
+      const latest = await this.ensureInitialized();
+      if (
+        hasOpenClarifications(latest.clarifications) ||
+        hasOpenHighPriorityQuestions(latest.questions)
+      ) {
+        return [];
+      }
+
+      if (!progressed) {
+        return [];
+      }
+    }
+
+    throw new Error("Manager loop exceeded the maximum stabilization passes.");
   }
 
   async dispatchAssignments(assignments) {
@@ -1074,6 +1376,7 @@ export async function startV2Run({
   missionInput,
   workerConfig,
   runtime,
+  autoBootstrap = false,
 }) {
   const mission = createMissionLock({
     workspaceRoot,
@@ -1101,7 +1404,9 @@ export async function startV2Run({
     runtime,
   });
 
-  await controller.continueReadyTasks();
+  if (autoBootstrap) {
+    await controller.advanceManagerLoop();
+  }
   return controller.loadRunBundle();
 }
 
@@ -1118,6 +1423,7 @@ export async function resumeV2Run({
   workspaceRoot,
   runId,
   runtime,
+  autoBootstrap = false,
 }) {
   const bundle = await loadRunBundle(workspaceRoot, runId);
   const controller = new LongRunController({
@@ -1127,7 +1433,11 @@ export async function resumeV2Run({
     runtime,
   });
   await controller.ensureInitialized();
-  await controller.continueReadyTasks();
+  if (autoBootstrap) {
+    await controller.advanceManagerLoop();
+  } else {
+    await controller.continueReadyTasks();
+  }
   return controller.finalizeRunIfDeliverable();
 }
 

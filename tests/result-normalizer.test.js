@@ -59,3 +59,40 @@ test("child-agent result validation rejects blank summaries and invalid question
     /summary is required|questions\[\]\.priority/i,
   );
 });
+
+test("child-agent result validation rejects invalid task proposals and staffing entries", () => {
+  const normalized = normalizeChildAgentResult({
+    agentId: "agent-3",
+    taskId: "task-3",
+    role: "planner",
+    status: "completed",
+    summary: "Produced planning output.",
+    evidence: [],
+    filesTouched: [],
+    questions: [],
+    taskProposals: [
+      {
+        id: "proposal-1",
+        title: "Broken proposal",
+        objective: "Missing a valid role.",
+        role: "writer",
+        dependencies: [],
+        acceptanceChecks: [],
+        allowedFiles: [],
+        forbiddenFiles: [],
+      },
+    ],
+    staffing: [
+      {
+        role: "observer",
+        count: 0,
+        rationale: "Invalid count",
+      },
+    ],
+  });
+
+  assert.throws(
+    () => validateNormalizedChildAgentResult(normalized),
+    /taskProposals\[\]\.role|staffing\[\]\.count/i,
+  );
+});
