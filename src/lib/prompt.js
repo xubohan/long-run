@@ -1,4 +1,5 @@
 import { summarizePlan } from "./planner.js";
+import { buildAuthorityPromptSection } from "./authority.js";
 
 function formatList(title, items) {
   if (!items || items.length === 0) {
@@ -53,11 +54,23 @@ ${mission.goal}
 Definition of done:
 ${mission.definitionOfDone.map((item, index) => `${index + 1}. ${item}`).join("\n")}
 
+${formatList("Clarifications", mission.clarifications)}
+
 ${formatList("Constraints", mission.constraints)}
 
 ${formatList("Non-goals", mission.nonGoals)}
 
 ${formatList("Guardrails", mission.guardrails)}
+
+${buildAuthorityPromptSection()}
+
+Mandatory development loop:
+- 理解/观察 -> 拆任务 -> 实现 -> 自测 -> verifier验证 -> review -> fix -> 再验证 -> manager验证 -> 交付
+
+Legacy shipping gate:
+- If you claim goal_completed, include verification.status and verification.evidence.
+- goal_completed without verifier pass evidence will be rejected.
+- Even after verifier pass, the legacy path is still review-required and not shippable yet.
 
 Current focus task:
 - id: ${currentTask?.id ?? "none"}
@@ -75,5 +88,6 @@ What to do in this cycle:
 - If the focus task is complete, say so and propose the next concrete tasks.
 - If you hit a blocker, explain whether it requires human input.
 - Fill definition_of_done for every criterion listed above.
+- Fill verification with one of: pass, fail, unclear, not_run.
 - Keep the summary factual and concise.`;
 }

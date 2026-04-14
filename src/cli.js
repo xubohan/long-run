@@ -6,19 +6,21 @@ import { parseArgs } from "node:util";
 import { normalizeMissionInput } from "./lib/mission.js";
 import { readJsonLines } from "./lib/io.js";
 import {
-  approveRun,
-  loadStatus,
-  requestStop,
-  resumeRun,
-  startRun,
-} from "./lib/supervisor.js";
+  answerManagedRun,
+  approveManagedRun,
+  loadManagedStatus,
+  resumeManagedRun,
+  startManagedRun,
+  stopManagedRun,
+} from "./lib/run-router.js";
 
 function usage() {
   return `Usage:
-  longrun start --goal "..." --done "..."
+  longrun start --goal "..." --done "..." [--engine v1|v2]
   longrun status [run_id]
   longrun resume [run_id]
   longrun approve [run_id] [--note "..."] [--no-resume]
+  longrun answer [run_id] --clarification-id "..." --answer "..."
   longrun stop [run_id] [--reason "..."]
   longrun logs [run_id] [--tail 30]
 
@@ -28,6 +30,8 @@ Common options for start:
   --constraint      Repeatable constraint
   --non-goal        Repeatable non-goal
   --guardrail       Repeatable guardrail
+  --clarification   Repeatable clarification
+  --engine          Run engine (default: v1)
   --model           Codex model override
   --profile         Codex profile
   --sandbox         Sandbox mode (default: workspace-write)
@@ -48,6 +52,7 @@ function parseCommandArgs(argv) {
       "non-goal": { type: "string", multiple: true },
       guardrail: { type: "string", multiple: true },
       clarification: { type: "string", multiple: true },
+      engine: { type: "string" },
       model: { type: "string" },
       profile: { type: "string" },
       sandbox: { type: "string" },
@@ -55,6 +60,8 @@ function parseCommandArgs(argv) {
       config: { type: "string", multiple: true },
       note: { type: "string" },
       reason: { type: "string" },
+      answer: { type: "string" },
+      "clarification-id": { type: "string" },
       tail: { type: "string" },
       "no-resume": { type: "boolean" },
       "dangerous-bypass": { type: "boolean" },
@@ -155,6 +162,7 @@ function printStatus(bundle) {
   );
 
   process.stdout.write(`run_id: ${bundle.run.runId}\n`);
+  process.stdout.write(`engine: ${bundle.run.engine}\n`);
   process.stdout.write(`status: ${bundle.run.status}\n`);
   process.stdout.write(`mission_digest: ${bundle.run.missionDigest}\n`);
   process.stdout.write(`cycles: ${bundle.run.currentCycle}\n`);
@@ -180,9 +188,10 @@ async function run() {
 
   if (command === "start") {
     const missionInput = await collectMissionInput(values);
-    const result = await startRun({
+    const result = await startManagedRun({
       workspaceRoot,
       missionInput,
+      engine: values.engine ?? "v1",
       maxCycles: Number(values["max-cycles"] ?? 0),
       workerConfig: {
         model: values.model,
@@ -201,18 +210,18 @@ async function run() {
   }
 
   if (command === "status") {
-    printStatus(await loadStatus(workspaceRoot, runId));
+    printStatus(await loadManagedStatus(workspaceRoot, runId));
     return;
   }
 
   if (command === "resume") {
-    printStatus(await resumeRun({ workspaceRoot, runId }));
+    printStatus(await resumeManagedRun({ workspaceRoot, runId }));
     return;
   }
 
   if (command === "approve") {
     printStatus(
-      await approveRun({
+      await approveManagedRun({
         workspaceRoot,
         runId,
         note: values.note ?? "",
@@ -222,9 +231,25 @@ async function run() {
     return;
   }
 
+  if (command === "answer") {
+    if (!values["clarification-id"] || !values.answer) {
+      throw new Error("answer requires --clarification-id and --answer.");
+    }
+
+    printStatus(
+      await answerManagedRun({
+        workspaceRoot,
+        runId,
+        clarificationId: values["clarification-id"],
+        answer: values.answer,
+      }),
+    );
+    return;
+  }
+
   if (command === "stop") {
     printStatus(
-      await requestStop({
+      await stopManagedRun({
         workspaceRoot,
         runId,
         reason: values.reason ?? "Stopped by user.",
@@ -234,7 +259,7 @@ async function run() {
   }
 
   if (command === "logs") {
-    const bundle = await loadStatus(workspaceRoot, runId);
+    const bundle = await loadManagedStatus(workspaceRoot, runId);
     const limit = Number(values.tail ?? 30);
     const events = await readJsonLines(bundle.paths.eventsFile);
     for (const event of events.slice(-limit)) {

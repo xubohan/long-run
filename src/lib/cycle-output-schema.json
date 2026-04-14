@@ -114,6 +114,28 @@
     "next_focus_task": {
       "type": "string"
     },
+    "verification": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "pass",
+            "fail",
+            "unclear",
+            "not_run"
+          ]
+        },
+        "evidence": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "evidence"
+      ],
+      "additionalProperties": false
+    },
     "definition_of_done": {
       "type": "array",
       "items": {
@@ -171,6 +193,7 @@
     "tasks_completed",
     "tasks_to_add",
     "next_focus_task",
+    "verification",
     "definition_of_done",
     "proposed_goal_changes",
     "blockers"

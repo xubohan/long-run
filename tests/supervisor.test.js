@@ -23,6 +23,10 @@ function makeCycleOutput(overrides = {}) {
     tasks_completed: [],
     tasks_to_add: [],
     next_focus_task: "",
+    verification: {
+      status: "not_run",
+      evidence: "",
+    },
     definition_of_done: [
       {
         criterion: "Create the target file",
@@ -66,7 +70,7 @@ class FakeWorker {
   }
 }
 
-test("startRun completes the mission and persists the mission digest", async () => {
+test("startRun rejects legacy goal completion claims without verifier pass and persists the mission digest", async () => {
   const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "longrun-"));
   const worker = new FakeWorker([
     {
@@ -89,7 +93,7 @@ test("startRun completes the mission and persists the mission digest", async () 
     {
       threadId: "thread-1",
       output: makeCycleOutput({
-        summary: "Implemented the target file and verified completion.",
+        summary: "Implemented the target file and claimed completion.",
         status: "goal_completed",
         current_task_completed: true,
         evidence: ["goal.txt now exists with the expected content."],
@@ -120,9 +124,13 @@ test("startRun completes the mission and persists the mission digest", async () 
 
   const persisted = await loadRunBundle(workspaceRoot, result.run.runId);
 
-  assert.equal(result.run.status, "completed");
+  assert.equal(result.run.status, "paused");
   assert.equal(result.run.threadId, "thread-1");
   assert.equal(persisted.mission.digest, result.mission.digest);
+  assert.equal(result.run.engine, "v1");
+  assert.equal(result.run.runtimeVersion, 1);
+  assert.match(result.run.pendingApproval.reason, /Verifier pass with evidence is required/);
+  assert.equal(result.run.shippingStatus, "not_shippable_yet");
 });
 
 test("startRun pauses after three no-progress cycles", async () => {
@@ -239,7 +247,8 @@ test("resumeRun reuses the previous thread id after a persisted pause", async ()
   });
 
   assert.equal(secondWorker.calls[0].threadId, "thread-resume");
-  assert.equal(resumed.run.status, "completed");
+  assert.equal(resumed.run.status, "paused");
+  assert.equal(resumed.run.reviewStatus, "required");
 });
 
 test("next_focus_task without tasks_to_add still becomes the next focus", async () => {
@@ -274,4 +283,47 @@ test("next_focus_task without tasks_to_add still becomes the next focus", async 
 
   assert.equal(result.run.status, "paused");
   assert.equal(focusTask.title, "Implement the target file now");
+});
+
+test("legacy goal completion with verifier evidence still pauses for review_required semantics", async () => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "longrun-"));
+  const worker = new FakeWorker([
+    {
+      output: makeCycleOutput({
+        summary: "Verifier-backed completion evidence is available.",
+        status: "goal_completed",
+        current_task_completed: true,
+        evidence: ["goal.txt now exists with the expected content."],
+        files_touched: ["goal.txt"],
+        verification: {
+          status: "pass",
+          evidence: "Verifier reran the required checks successfully.",
+        },
+        definition_of_done: [
+          {
+            criterion: "Create the target file",
+            status: "met",
+            evidence: "goal.txt now exists with the expected content.",
+          },
+        ],
+      }),
+    },
+  ]);
+
+  const result = await startRun({
+    workspaceRoot,
+    missionInput: {
+      goal: "Create the target file",
+      definitionOfDone: ["Create the target file"],
+      constraints: [],
+      nonGoals: [],
+      guardrails: [],
+    },
+    worker,
+  });
+
+  assert.equal(result.run.status, "paused");
+  assert.equal(result.run.reviewStatus, "required");
+  assert.equal(result.run.shippingStatus, "not_shippable_yet");
+  assert.match(result.run.pendingApproval.reason, /review is still required/i);
 });

@@ -9,6 +9,7 @@ import {
   mergeSuggestedTasks,
 } from "./planner.js";
 import { clone, normalizeText } from "./io.js";
+import { evaluateLegacyShippingReadiness } from "./verification.js";
 
 function normalizeBugSignature(bug) {
   return normalizeText(bug?.signature || bug?.description || "");
@@ -50,6 +51,10 @@ export function buildFallbackCycleOutput({ mission, message }) {
     tasks_completed: [],
     tasks_to_add: [],
     next_focus_task: "",
+    verification: {
+      status: "not_run",
+      evidence: "",
+    },
     definition_of_done: mission.definitionOfDone.map((criterion) => ({
       criterion,
       status: "unknown",
@@ -66,6 +71,7 @@ export function auditCycle({ mission, run, plan, cycleOutput }) {
   const issueCounts = { ...(run.issueCounts ?? {}) };
   const pauseReasons = [];
   const bugSummaries = [];
+  const shippingReadiness = evaluateLegacyShippingReadiness(cycleOutput);
 
   if (currentTask && (cycleOutput.current_task_completed || cycleOutput.status === "task_completed" || cycleOutput.status === "goal_completed")) {
     markTaskCompleted(nextPlan, currentTask.id, cycleOutput.summary);
@@ -135,13 +141,35 @@ export function auditCycle({ mission, run, plan, cycleOutput }) {
 
   const unmet = unmetCriteria(mission, cycleOutput);
 
-  if (cycleOutput.status === "goal_completed" && unmet.length > 0) {
+  if (cycleOutput.status === "goal_completed") {
     for (const criterion of unmet) {
       addSystemTask(
         nextPlan,
         `Close remaining definition-of-done gap: ${criterion}`,
         "The worker claimed completion without satisfying all success criteria.",
       );
+    }
+
+    if (!shippingReadiness.verifierPassed) {
+      addSystemTask(
+        nextPlan,
+        "Obtain verifier-backed completion evidence",
+        "Legacy completion claims require a verifier pass with explicit evidence.",
+      );
+    }
+
+    if (shippingReadiness.reviewStatus === "required") {
+      addSystemTask(
+        nextPlan,
+        "Request independent review before shipping",
+        "Legacy completion remains review-required and not shippable yet.",
+      );
+    }
+  }
+
+  for (const reason of shippingReadiness.reasons) {
+    if (cycleOutput.status === "goal_completed") {
+      pauseReasons.push(reason);
     }
   }
 
@@ -157,7 +185,10 @@ export function auditCycle({ mission, run, plan, cycleOutput }) {
   chooseFocusTask(nextPlan, cycleOutput.next_focus_task);
 
   const completed =
-    cycleOutput.status === "goal_completed" && unmet.length === 0;
+    cycleOutput.status === "goal_completed" &&
+    unmet.length === 0 &&
+    shippingReadiness.verifierPassed &&
+    shippingReadiness.reviewStatus !== "required";
   const paused = pauseReasons.length > 0;
 
   const decision = completed ? "completed" : paused ? "pause" : "continue";
@@ -179,8 +210,13 @@ export function auditCycle({ mission, run, plan, cycleOutput }) {
         decision,
         reason,
         bugSignatures: bugSummaries,
+        shippingStatus: shippingReadiness.shippingStatus,
+        reviewStatus: shippingReadiness.reviewStatus,
+        verification: shippingReadiness.verification,
         definitionOfDone: cycleOutput.definition_of_done,
       },
+      shippingStatus: shippingReadiness.shippingStatus,
+      reviewStatus: shippingReadiness.reviewStatus,
     },
   };
 }

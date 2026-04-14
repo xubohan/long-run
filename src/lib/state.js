@@ -43,6 +43,8 @@ export async function initializeRun({
   plan,
   workerConfig,
   maxCycles = 0,
+  engine = "v1",
+  runtimeVersion = 1,
 }) {
   const runId = makeRunId(mission.goal);
   const paths = getRunPaths(workspaceRoot, runId);
@@ -50,6 +52,8 @@ export async function initializeRun({
 
   const run = {
     version: 1,
+    engine,
+    runtimeVersion,
     runId,
     missionDigest: mission.digest,
     workspaceRoot,
@@ -64,6 +68,8 @@ export async function initializeRun({
     lastDecision: "ready",
     lastSummary: "",
     lastAudit: null,
+    shippingStatus: "in_progress",
+    reviewStatus: "not_requested",
     noProgressCount: 0,
     issueCounts: {},
     pendingApproval: null,
