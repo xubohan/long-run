@@ -59,3 +59,10 @@ test("cli routes v2 runs by engine and exposes the clarification answer path", a
   assert.match(answered.stdout, /engine: v2/);
   assert.match(answered.stdout, /status: ready/);
 });
+
+test("cli help exposes auto-bootstrap for approve and answer on v2 flows", async () => {
+  const help = await execFile("node", [cliPath, "--help"]);
+
+  assert.match(help.stdout, /approve .*--auto-bootstrap/);
+  assert.match(help.stdout, /answer .*--auto-bootstrap/);
+});

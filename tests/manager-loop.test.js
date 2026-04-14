@@ -310,6 +310,48 @@ test("resume after clarification answer runs planner, persists task graph, and d
   assert.equal(resumed.run.status, "completed");
 });
 
+test("answerV2Run can auto-bootstrap the remaining loop after a clarification answer", async () => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "longrun-manager-loop-"));
+  const adapter = new ManagerPlanningRuntimeAdapter();
+  const runtime = new NativeAgentRuntime({ adapter });
+
+  const started = await startV2Run({
+    workspaceRoot,
+    missionInput: {
+      goal: "Drive the manager loop forward immediately after an answer",
+      definitionOfDone: ["Answer path can resume the native-agent loop automatically."],
+    },
+    workerConfig: {
+      sandbox: "workspace-write",
+      config: [],
+    },
+    runtime,
+    autoBootstrap: true,
+  });
+
+  const preAnswerState = await loadV2ControllerState(workspaceRoot, started.run.runId);
+  const answered = await answerV2Run({
+    workspaceRoot,
+    runId: started.run.runId,
+    clarificationId: preAnswerState.clarifications[0].id,
+    answer: "Yes, route all coordination through controller state only.",
+    runtime,
+    autoBootstrap: true,
+  });
+
+  const plannerCalls = adapter.calls.filter((call) => call.role === "planner");
+  const executorCalls = adapter.calls.filter((call) => call.role === "executor");
+  const verifierCalls = adapter.calls.filter((call) => call.role === "verifier");
+  const reviewerCalls = adapter.calls.filter((call) => call.role === "reviewer");
+
+  assert.equal(plannerCalls.length, 1);
+  assert.equal(executorCalls.length, 1);
+  assert.equal(verifierCalls.length, 1);
+  assert.equal(reviewerCalls.length, 1);
+  assert.equal(answered.run.status, "completed");
+  assert.equal(answered.controllerState.controller.currentPhase, "complete");
+});
+
 test("manager clarification bootstrap rejects more than three blocking questions", async () => {
   const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "longrun-manager-loop-"));
   const runtime = new NativeAgentRuntime({

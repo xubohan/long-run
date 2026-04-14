@@ -19,8 +19,8 @@ function usage() {
   longrun start --goal "..." --done "..." [--engine v1|v2] [--auto-bootstrap]
   longrun status [run_id]
   longrun resume [run_id] [--auto-bootstrap]
-  longrun approve [run_id] [--note "..."] [--no-resume]
-  longrun answer [run_id] --clarification-id "..." --answer "..."
+  longrun approve [run_id] [--note "..."] [--no-resume] [--auto-bootstrap]
+  longrun answer [run_id] --clarification-id "..." --answer "..." [--auto-bootstrap]
   longrun stop [run_id] [--reason "..."]
   longrun logs [run_id] [--tail 30]
 
@@ -235,6 +235,7 @@ async function run() {
         runId,
         note: values.note ?? "",
         resume: !values["no-resume"],
+        autoBootstrap: Boolean(values["auto-bootstrap"]),
       }),
     );
     return;
@@ -251,6 +252,7 @@ async function run() {
         runId,
         clarificationId: values["clarification-id"],
         answer: values.answer,
+        autoBootstrap: Boolean(values["auto-bootstrap"]),
       }),
     );
     return;

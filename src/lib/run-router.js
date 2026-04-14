@@ -99,6 +99,7 @@ export async function approveManagedRun({
   note = "",
   resume = true,
   worker,
+  autoBootstrap = false,
 }) {
   const { bundle } = await resolveBundle(workspaceRoot, runId);
   if (bundle.run.engine === "v2") {
@@ -116,6 +117,7 @@ export async function approveManagedRun({
       workspaceRoot,
       runId: bundle.run.runId,
       worker,
+      autoBootstrap,
     });
   }
 
@@ -150,6 +152,7 @@ export async function answerManagedRun({
   runId = "",
   clarificationId,
   answer,
+  autoBootstrap = false,
 }) {
   const { bundle } = await resolveBundle(workspaceRoot, runId);
   if (bundle.run.engine !== "v2") {
@@ -161,5 +164,6 @@ export async function answerManagedRun({
     runId: bundle.run.runId,
     clarificationId,
     answer,
+    autoBootstrap,
   });
 }

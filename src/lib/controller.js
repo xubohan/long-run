@@ -1552,18 +1552,26 @@ export async function answerV2Run({
   runId,
   clarificationId,
   answer,
+  runtime,
+  autoBootstrap = false,
 }) {
   const bundle = await loadRunBundle(workspaceRoot, runId);
   const controller = new LongRunController({
     workspaceRoot,
     runId,
     missionDigest: bundle.mission.digest,
+    runtime,
   });
 
   await controller.answerClarification({
     clarificationId,
     answer,
   });
+
+  if (autoBootstrap) {
+    await controller.advanceManagerLoop();
+    return controller.finalizeRunIfDeliverable();
+  }
 
   return controller.loadRunBundle();
 }
