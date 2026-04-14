@@ -27,6 +27,7 @@ export function buildRolePromptEnvelope({
     `Task id: ${taskPacket.id}`,
     `Task title: ${taskPacket.title}`,
     `Objective: ${taskPacket.objective || "none"}`,
+    formatList("Read focus roots", taskPacket.readRoots ?? []),
     formatList("Allowed files", taskPacket.allowedFiles ?? []),
     formatList("Forbidden files", taskPacket.forbiddenFiles ?? []),
     formatList("Acceptance checks", taskPacket.acceptanceChecks ?? []),

@@ -61,6 +61,7 @@
           "role",
           "dependencies",
           "acceptanceChecks",
+          "readRoots",
           "allowedFiles",
           "forbiddenFiles"
         ],
@@ -86,6 +87,10 @@
             "items": { "type": "string" }
           },
           "acceptanceChecks": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "readRoots": {
             "type": "array",
             "items": { "type": "string" }
           },

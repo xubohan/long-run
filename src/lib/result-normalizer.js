@@ -55,6 +55,7 @@ function normalizeTaskProposal(proposal) {
     role: normalizeString(proposal?.role),
     dependencies: normalizeStringList(proposal?.dependencies),
     acceptanceChecks: normalizeStringList(proposal?.acceptanceChecks),
+    readRoots: normalizeStringList(proposal?.readRoots),
     allowedFiles: normalizeStringList(proposal?.allowedFiles),
     forbiddenFiles: normalizeStringList(proposal?.forbiddenFiles),
   };

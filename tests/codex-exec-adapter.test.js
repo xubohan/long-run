@@ -132,6 +132,7 @@ test("child-agent output schema keeps optional role payloads nullable but requir
     "staffing",
     "verification",
   ].sort());
+  assert.ok(schema.properties.taskProposals.items.required.includes("readRoots"));
   assert.deepEqual(schema.properties.verification.type, ["object", "null"]);
   assert.deepEqual(schema.properties.review.type, ["object", "null"]);
 });

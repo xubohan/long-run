@@ -41,6 +41,7 @@ export function createV2Task({
   status = "queued",
   dependencies = [],
   acceptanceChecks = [],
+  readRoots = [],
   allowedFiles = [],
   forbiddenFiles = [],
 }) {
@@ -62,6 +63,7 @@ export function createV2Task({
     status,
     dependencies: [...dependencies],
     acceptanceChecks: [...acceptanceChecks],
+    readRoots: [...readRoots],
     allowedFiles: [...allowedFiles],
     forbiddenFiles: [...forbiddenFiles],
     createdAt: now,

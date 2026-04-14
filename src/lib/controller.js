@@ -87,6 +87,7 @@ function buildTaskRecord(taskPacket) {
     status: "dispatched",
     dependencies: taskPacket.dependencies ?? [],
     acceptanceChecks: taskPacket.acceptanceChecks ?? [],
+    readRoots: taskPacket.readRoots ?? [],
     allowedFiles: taskPacket.allowedFiles ?? [],
     forbiddenFiles: taskPacket.forbiddenFiles ?? [],
   });
@@ -115,6 +116,10 @@ function hydrateTaskRecord(existingTask, taskPacket) {
 
   if (taskPacket.acceptanceChecks != null) {
     existingTask.acceptanceChecks = [...taskPacket.acceptanceChecks];
+  }
+
+  if (taskPacket.readRoots != null) {
+    existingTask.readRoots = [...taskPacket.readRoots];
   }
 
   if (taskPacket.allowedFiles != null) {
@@ -391,6 +396,7 @@ function createBootstrapTaskPacket({
   role,
   missionGoal,
   definitionOfDone = [],
+  readRoots = [],
 }) {
   return {
     id,
@@ -405,6 +411,7 @@ function createBootstrapTaskPacket({
     ownerRole: role,
     dependencies: [],
     acceptanceChecks: definitionOfDone,
+    readRoots,
     allowedFiles: [],
     forbiddenFiles: [],
   };
@@ -490,6 +497,7 @@ export class LongRunController {
       role: "manager",
       missionGoal: runBundle.mission.goal,
       definitionOfDone: runBundle.mission.definitionOfDone,
+      readRoots: [".omx/plans", ".omx/specs", "docs", "src", "tests"],
     });
     const agentSession = await this.ensureAgentSession({
       role: "manager",
@@ -566,6 +574,7 @@ export class LongRunController {
       role: "planner",
       missionGoal: runBundle.mission.goal,
       definitionOfDone: runBundle.mission.definitionOfDone,
+      readRoots: [".omx/plans", ".omx/specs", "docs", "src", "tests"],
     });
     const agentSession = await this.ensureAgentSession({
       role: "planner",
@@ -614,6 +623,7 @@ export class LongRunController {
         status: "queued",
         dependencies: proposal.dependencies ?? [],
         acceptanceChecks: proposal.acceptanceChecks ?? [],
+        readRoots: proposal.readRoots ?? [],
         allowedFiles: proposal.allowedFiles ?? [],
         forbiddenFiles: proposal.forbiddenFiles ?? [],
       });
@@ -664,6 +674,7 @@ export class LongRunController {
           ownerRole: task.ownerRole || "executor",
           dependencies: task.dependencies ?? [],
           acceptanceChecks: task.acceptanceChecks ?? [],
+          readRoots: task.readRoots ?? [],
           allowedFiles: task.allowedFiles ?? [],
           forbiddenFiles: task.forbiddenFiles ?? [],
         },
@@ -1020,6 +1031,7 @@ export class LongRunController {
       id: taskId,
       title: taskId,
       objective: "",
+      readRoots: [],
       allowedFiles: [],
       forbiddenFiles: [],
       acceptanceChecks: [],

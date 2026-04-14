@@ -11,6 +11,7 @@ test("role prompt envelopes carry authority precedence, task scope, and accepted
       id: "task-7",
       title: "Implement verification gate",
       objective: "Add the gate without changing unrelated behavior.",
+      readRoots: ["src/lib", "tests"],
       allowedFiles: ["src/lib/auditor.js", "tests/supervisor.test.js"],
       forbiddenFiles: ["README.md"],
       acceptanceChecks: ["npm test", "node --check src/lib/auditor.js"],
@@ -19,6 +20,8 @@ test("role prompt envelopes carry authority precedence, task scope, and accepted
   });
 
   assert.match(envelope.systemPrompt, /Authority precedence:/);
+  assert.match(envelope.taskPrompt, /Read focus roots:/);
+  assert.match(envelope.taskPrompt, /src\/lib/);
   assert.match(envelope.taskPrompt, /Allowed files:/);
   assert.match(envelope.taskPrompt, /src\/lib\/auditor\.js/);
   assert.match(envelope.taskPrompt, /Forbidden files:/);

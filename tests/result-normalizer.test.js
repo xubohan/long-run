@@ -78,6 +78,7 @@ test("child-agent result validation rejects invalid task proposals and staffing 
         role: "writer",
         dependencies: [],
         acceptanceChecks: [],
+        readRoots: [],
         allowedFiles: [],
         forbiddenFiles: [],
       },

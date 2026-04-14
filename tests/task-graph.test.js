@@ -14,10 +14,12 @@ test("createV2Task enforces valid stage and status", () => {
     title: "Implement controller state",
     stage: "planning",
     status: "queued",
+    readRoots: ["src", "tests"],
   });
 
   assert.equal(task.stage, "planning");
   assert.equal(task.status, "queued");
+  assert.deepEqual(task.readRoots, ["src", "tests"]);
 });
 
 test("getOpenTasks excludes accepted and cancelled tasks", () => {
