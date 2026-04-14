@@ -139,6 +139,95 @@ class ManagerPlanningRuntimeAdapter {
   }
 }
 
+class OverClarifyingManagerRuntimeAdapter extends ManagerPlanningRuntimeAdapter {
+  async runTask(args) {
+    if (args.agentSession.role !== "manager") {
+      return super.runTask(args);
+    }
+
+    return {
+      agentId: args.agentSession.agentId,
+      taskId: args.taskPacket.id,
+      role: args.agentSession.role,
+      threadId: `thread-${args.agentSession.agentId}`,
+      status: "completed",
+      summary: "Manager asked too many blocking clarification questions.",
+      evidence: ["Need more context."],
+      filesTouched: [],
+      questions: [
+        { question: "Question 1?", priority: "high", toRole: "manager" },
+        { question: "Question 2?", priority: "high", toRole: "manager" },
+        { question: "Question 3?", priority: "high", toRole: "manager" },
+        { question: "Question 4?", priority: "high", toRole: "manager" },
+      ],
+      taskProposals: [],
+      staffing: [
+        { role: "planner", count: 1, rationale: "Need one planner." },
+      ],
+      verification: null,
+      review: null,
+    };
+  }
+}
+
+class UnderstaffedPlannerRuntimeAdapter extends ManagerPlanningRuntimeAdapter {
+  async runTask(args) {
+    if (args.agentSession.role === "manager") {
+      return {
+        agentId: args.agentSession.agentId,
+        taskId: args.taskPacket.id,
+        role: args.agentSession.role,
+        threadId: `thread-${args.agentSession.agentId}`,
+        status: "completed",
+        summary: "Manager has enough clarified context to start planning immediately.",
+        evidence: ["Repo task, target scope, and acceptance criteria are already known."],
+        filesTouched: [],
+        questions: [],
+        taskProposals: [],
+        staffing: [
+          { role: "planner", count: 1, rationale: "Need one planner to produce the first wave." },
+        ],
+        verification: null,
+        review: null,
+      };
+    }
+
+    if (args.agentSession.role !== "planner") {
+      return super.runTask(args);
+    }
+
+    return {
+      agentId: args.agentSession.agentId,
+      taskId: args.taskPacket.id,
+      role: args.agentSession.role,
+      threadId: `thread-${args.agentSession.agentId}`,
+      status: "completed",
+      summary: "Planner proposed work without fully covering role staffing.",
+      evidence: ["Missing observer staffing coverage."],
+      filesTouched: [],
+      questions: [],
+      taskProposals: [
+        {
+          id: "task-observer-missing-staffing",
+          title: "Inspect controller facts",
+          objective: "Read-only gather controller facts.",
+          role: "observer",
+          dependencies: [],
+          acceptanceChecks: ["Return one repo fact."],
+          readRoots: ["src/lib"],
+          allowedFiles: ["src/lib/controller.js"],
+          forbiddenFiles: [],
+        },
+      ],
+      staffing: [
+        { role: "executor", count: 1, rationale: "Single writer only." },
+      ],
+      verification: null,
+      review: null,
+    };
+  }
+}
+
 test("startV2Run triggers a manager clarification pass before implementation dispatch", async () => {
   const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "longrun-manager-loop-"));
   const adapter = new ManagerPlanningRuntimeAdapter();
@@ -219,4 +308,54 @@ test("resume after clarification answer runs planner, persists task graph, and d
   assert.equal(state.tasks.find((task) => task.id === "task-executor-1").ownerRole, "executor");
   assert.equal(resumed.controllerState.controller.currentPhase, "complete");
   assert.equal(resumed.run.status, "completed");
+});
+
+test("manager clarification bootstrap rejects more than three blocking questions", async () => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "longrun-manager-loop-"));
+  const runtime = new NativeAgentRuntime({
+    adapter: new OverClarifyingManagerRuntimeAdapter(),
+  });
+
+  await assert.rejects(
+    () =>
+      startV2Run({
+        workspaceRoot,
+        missionInput: {
+          goal: "Reject oversized clarification batches",
+          definitionOfDone: ["Manager clarification budget stays bounded."],
+        },
+        workerConfig: {
+          sandbox: "workspace-write",
+          config: [],
+        },
+        runtime,
+        autoBootstrap: true,
+      }),
+    /maximum question budget/i,
+  );
+});
+
+test("planner bootstrap rejects task proposals whose roles are missing from staffing", async () => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "longrun-manager-loop-"));
+  const runtime = new NativeAgentRuntime({
+    adapter: new UnderstaffedPlannerRuntimeAdapter(),
+  });
+
+  await assert.rejects(
+    () =>
+      startV2Run({
+        workspaceRoot,
+        missionInput: {
+          goal: "Reject planner outputs without staffing coverage",
+          definitionOfDone: ["Planner staffing must cover every proposed role."],
+        },
+        workerConfig: {
+          sandbox: "workspace-write",
+          config: [],
+        },
+        runtime,
+        autoBootstrap: true,
+      }),
+    /must cover every proposed role/i,
+  );
 });

@@ -305,6 +305,30 @@ function getRoleDispatchLimit(staffingPlan = [], role) {
   return plannedCount;
 }
 
+function assertManagerClarificationBudget(questions = []) {
+  const managerQuestionCount = (questions ?? []).filter(
+    (question) => question.toRole === "manager",
+  ).length;
+
+  if (managerQuestionCount > 3) {
+    throw new Error(
+      `Manager clarification pass exceeded the maximum question budget: ${managerQuestionCount} > 3.`,
+    );
+  }
+}
+
+function assertStaffingCoversTaskProposalRoles(taskProposals = [], staffingPlan = []) {
+  const staffedRoles = new Set((staffingPlan ?? []).map((entry) => entry.role));
+  const proposedRoles = [...new Set((taskProposals ?? []).map((proposal) => proposal.role))];
+  const missingRoles = proposedRoles.filter((role) => !staffedRoles.has(role));
+
+  if (missingRoles.length > 0) {
+    throw new Error(
+      `Planner staffing plan must cover every proposed role. Missing roles: ${missingRoles.join(", ")}`,
+    );
+  }
+}
+
 function hasFreshCompletedRoleRun(state, {
   taskId,
   role,
@@ -549,6 +573,7 @@ export class LongRunController {
     state.controller.staffingPlan = runtimeResult.result.staffing ?? [];
     state.controller.managerSummary = runtimeResult.result.summary;
     state.controller.managerClarifiedAt = agentSession.lastRunAt;
+    assertManagerClarificationBudget(runtimeResult.result.questions);
 
     const clarificationRecords = [];
     for (const question of runtimeResult.result.questions ?? []) {
@@ -630,6 +655,10 @@ export class LongRunController {
     }
 
     state.controller.staffingPlan = runtimeResult.result.staffing ?? state.controller.staffingPlan ?? [];
+    assertStaffingCoversTaskProposalRoles(
+      runtimeResult.result.taskProposals,
+      state.controller.staffingPlan,
+    );
     state.controller.planningSummary = runtimeResult.result.summary;
     state.controller.plannedTaskIds = [];
 
